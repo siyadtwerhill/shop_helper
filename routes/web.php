@@ -1,8 +1,11 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::get('/', function () {
-    return Inertia::render('Welcome');
+    return response()->json([
+        'message' => 'ShopPilot API Backend',
+        'status' => 'operational',
+        'sanctum' => 'installed'
+    ]);
 });
