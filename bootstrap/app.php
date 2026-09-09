@@ -15,6 +15,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
+
+        $middleware->alias([
+            'superadmin' => \App\Http\Middleware\IsSuperAdmin::class,
+            'shopowner' => \App\Http\Middleware\IsShopOwner::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
