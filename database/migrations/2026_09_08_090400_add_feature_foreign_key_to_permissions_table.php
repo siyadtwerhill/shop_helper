@@ -11,8 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('users', function (Blueprint $table) {
-            $table->string('username')->nullable()->unique()->after('name');
+        Schema::table('permissions', function (Blueprint $table) {
+            $table->foreign('feature_id')->references('id')->on('features')->onDelete('cascade');
         });
     }
 
@@ -21,8 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn('username');
+        Schema::table('permissions', function (Blueprint $table) {
+            $table->dropForeign(['feature_id']);
         });
     }
 };

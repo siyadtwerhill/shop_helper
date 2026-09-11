@@ -8,16 +8,15 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-class ShopOwner extends Authenticatable
+class Staff extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
     protected $fillable = [
         'user_id',
-        'shop_name',
-        'location',
-        'plan_id',
-        'staff_count',
+        'shop_owner_id',
+        'position',
+        'phone',
     ];
 
     protected $hidden = [
@@ -28,7 +27,7 @@ class ShopOwner extends Authenticatable
     protected function casts(): array
     {
         return [
-            // no special casts needed
+            'position' => 'string',
         ];
     }
 
@@ -37,18 +36,8 @@ class ShopOwner extends Authenticatable
         return $this->belongsTo(User::class);
     }
 
-    public function staff()
+    public function shopOwner()
     {
-        return $this->hasMany(\App\Models\Staff::class);
-    }
-
-    public function plan()
-    {
-        return $this->belongsTo(Plan::class);
-    }
-
-    public function hasModule(string $slug): bool
-    {
-        return $this->plan && $this->plan->hasModule($slug);
+        return $this->belongsTo(ShopOwner::class);
     }
 }

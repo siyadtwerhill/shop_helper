@@ -59,4 +59,19 @@ class User extends Authenticatable
     {
         return $this->role === 'shop_owner';
     }
+
+    public function isStaff(): bool
+    {
+        return $this->role === 'staff';
+    }
+
+    public function shopOwner()
+    {
+        return $this->hasOne(ShopOwner::class);
+    }
+
+    public function staff()
+    {
+        return $this->hasOne(Staff::class);
+    }
 }

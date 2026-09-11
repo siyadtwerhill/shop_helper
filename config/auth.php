@@ -40,14 +40,6 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
-        'shop_owner' => [
-            'driver' => 'session',
-            'provider' => 'shop_owners',
-        ],
-        'shop_owner_api' => [
-            'driver' => 'sanctum',
-            'provider' => 'shop_owners',
-        ],
     ],
 
     /*
@@ -72,15 +64,6 @@ return [
             'driver' => 'eloquent',
             'model' => env('AUTH_MODEL', App\Models\User::class),
         ],
-        'shop_owners' => [
-            'driver' => 'eloquent',
-            'model' => App\Models\ShopOwner::class,
-        ],
-
-        // 'users' => [
-        //     'driver' => 'database',
-        //     'table' => 'users',
-        // ],
     ],
 
     /*

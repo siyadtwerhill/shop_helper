@@ -14,13 +14,17 @@ class ShopOwnerSeeder extends Seeder
      */
     public function run(): void
     {
+        // Get the free plan (ID 1 after seeding)
+        $freePlan = \App\Models\Plan::where('slug', 'free')->first();
+
         ShopOwner::updateOrCreate(
-            ['email' => 'shopowner@shophelper.com'],
+            ['user_id' => 1],
             [
-                'username' => 'shopowner',
-                'shop_name' => 'My Shop',
-                'email' => 'shopowner@shophelper.com',
-                'password' => Hash::make('shopowner123'),
+                'user_id' => 1,
+                'shop_name' => 'My_Shop',
+                'location' => 'Yangon',
+                'plan_id' => $freePlan ? $freePlan->id : null,
+                'staff_count' => 0,
             ]
         );
     }
