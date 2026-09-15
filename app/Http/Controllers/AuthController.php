@@ -42,8 +42,17 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        // Build user data with permissions
+        $userData = $user->toArray();
+        if ($user->role === 'staff') {
+            $userData['permissions'] = $user->getAllPermissions()->pluck('name')->toArray();
+        } else {
+            // Shop owners and superadmins have all permissions
+            $userData['permissions'] = [];
+        }
+
         $payload = [
-            'user' => $user,
+            'user' => $userData,
             'role' => $user->role,
             'token' => $token,
         ];
@@ -88,6 +97,8 @@ class AuthController extends Controller
             'role' => 'shop_owner',
         ]);
 
+        // Default to Free plan (plan_id = 1)
+        // The plan determines which modules and features are available
         $shopOwner = ShopOwner::create([
             'user_id' => $user->id,
             'shop_name' => $request->shop_name,
@@ -98,57 +109,18 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        $userData = $user->toArray();
+        $userData['permissions'] = []; // Shop owners have all permissions
+
         return response()->json([
-            'user' => $user,
+            'user' => $userData,
             'role' => $user->role,
             'shop_owner' => $shopOwner,
             'token' => $token,
         ], 201);
     }
 
-    public function registerStaff(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'shop_owner_id' => 'required|exists:shop_owners,id',
-            'name' => 'required|string|max:255',
-            'username' => 'required|string|max:255|unique:users',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8',
-            'position' => 'nullable|string|max:255',
-            'phone' => 'nullable|string|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        $user = User::create([
-            'name' => $request->name,
-            'username' => $request->username,
-            'email' => $request->email,
-            'password' => bcrypt($request->password),
-            'role' => 'staff',
-        ]);
-
-        $staff = Staff::create([
-            'user_id' => $user->id,
-            'shop_owner_id' => $request->shop_owner_id,
-            'position' => $request->position,
-            'phone' => $request->phone,
-        ]);
-
-        $shopOwner = ShopOwner::find($request->shop_owner_id);
-        $shopOwner->increment('staff_count');
-
-        $token = $user->createToken('auth-token')->plainTextToken;
-
-        return response()->json([
-            'user' => $user,
-            'role' => $user->role,
-            'staff' => $staff,
-            'token' => $token,
-        ], 201);
-    }
+    // Staff registration removed - employees are only created by shop owners through the admin interface
 
     public function logout(Request $request)
     {

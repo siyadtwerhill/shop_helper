@@ -2,8 +2,8 @@
 
 return [
     'models' => [
-        'permission' => Spatie\Permission\Models\Permission::class,
-        'role' => Spatie\Permission\Models\Role::class,
+        'permission' => App\Models\Permission::class,
+        'role' => App\Models\Role::class,
     ],
 
     'table_names' => [
@@ -18,10 +18,10 @@ return [
         'role_morph_key' => 'role_id',
         'permission_morph_key' => 'permission_id',
         'model_morph_key' => 'model_id',
-        'team_foreign_key' => 'team_id',
+        'team_foreign_key' => 'shop_owner_id',
     ],
 
-    'teams' => false,
+    'teams' => false, // Temporarily disabled to fix permission system
 
     'display_permission' => 'name',
     'display_role' => 'name',

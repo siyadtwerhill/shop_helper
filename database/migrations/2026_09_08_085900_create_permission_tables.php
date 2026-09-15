@@ -49,11 +49,11 @@ return new class extends Migration
                 ->onDelete('cascade');
 
             if ($teams) {
-                $table->unsignedBigInteger($columnNames['team_foreign_key']);
+                $table->unsignedBigInteger($columnNames['team_foreign_key'])->nullable();
                 $table->index($columnNames['team_foreign_key']);
                 $table->foreign($columnNames['team_foreign_key'])
                     ->references('id')
-                    ->on($teams)
+                    ->on('shop_owners')
                     ->onDelete('cascade');
             }
 
@@ -74,11 +74,11 @@ return new class extends Migration
                 ->onDelete('cascade');
 
             if ($teams) {
-                $table->unsignedBigInteger($columnNames['team_foreign_key']);
+                $table->unsignedBigInteger($columnNames['team_foreign_key'])->nullable();
                 $table->index($columnNames['team_foreign_key']);
                 $table->foreign($columnNames['team_foreign_key'])
                     ->references('id')
-                    ->on($teams)
+                    ->on('shop_owners')
                     ->onDelete('cascade');
             }
 

@@ -16,9 +16,12 @@ class FeatureController extends Controller
             'slug' => 'required|string|max:255|unique:features',
         ]);
 
-        $module->features()->create($data);
+        $feature = $module->features()->create($data);
 
-        return back()->with('success', 'Feature added — 4 permissions created automatically.');
+        return response()->json([
+            'feature' => $feature,
+            'message' => 'Feature added — 4 permissions created automatically.',
+        ], 201);
     }
 
     public function update(Request $request, Feature $feature)
@@ -27,13 +30,16 @@ class FeatureController extends Controller
             'name' => 'required|string|max:255',
             'sort_order' => 'integer',
         ]);
+
         $feature->update($data);
-        return back();
+
+        return response()->json(['feature' => $feature, 'message' => 'Feature updated.']);
     }
 
     public function destroy(Feature $feature)
     {
         $feature->delete();
-        return back()->with('success', 'Feature and its permissions removed.');
+
+        return response()->json(['message' => 'Feature and its permissions removed.']);
     }
 }

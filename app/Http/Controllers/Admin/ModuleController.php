@@ -5,20 +5,14 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Module;
 use Illuminate\Http\Request;
-use Inertia\Inertia;
 
 class ModuleController extends Controller
 {
     public function index()
     {
-        return Inertia::render('Admin/Modules/Index', [
+        return response()->json([
             'modules' => Module::withCount('features')->orderBy('sort_order')->get(),
         ]);
-    }
-
-    public function create()
-    {
-        return Inertia::render('Admin/Modules/Create');
     }
 
     public function store(Request $request)
@@ -30,13 +24,14 @@ class ModuleController extends Controller
             'description' => 'nullable|string',
         ]);
 
-        Module::create($data);
-        return back()->with('success', 'Module created.');
+        $module = Module::create($data);
+
+        return response()->json(['module' => $module, 'message' => 'Module created.'], 201);
     }
 
     public function show(Module $module)
     {
-        return Inertia::render('Admin/Modules/Show', [
+        return response()->json([
             'module' => $module->load('features.permissions'),
         ]);
     }
@@ -50,13 +45,16 @@ class ModuleController extends Controller
             'is_active' => 'boolean',
             'sort_order' => 'integer',
         ]);
+
         $module->update($data);
-        return back()->with('success', 'Module updated.');
+
+        return response()->json(['module' => $module, 'message' => 'Module updated.']);
     }
 
     public function destroy(Module $module)
     {
         $module->delete();
-        return redirect()->route('admin.modules.index');
+
+        return response()->json(['message' => 'Module deleted.']);
     }
 }
