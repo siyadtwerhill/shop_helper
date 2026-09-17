@@ -134,4 +134,88 @@ class AuthController extends Controller
         }
         return response()->json(['message' => 'Logged out successfully']);
     }
+
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+        
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|max:255|unique:users,email,' . $user->id,
+            'phone' => 'nullable|string|max:20',
+            'profile_photo' => 'nullable|image|mimes:jpg,jpeg,png,gif|max:2048',
+            // Shop owner specific fields
+            'shop_name' => 'nullable|string|max:255',
+            'location' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:500',
+            'shop_phone' => 'nullable|string|max:20',
+            'business_type' => 'nullable|string|max:100',
+            'tax_id' => 'nullable|string|max:50',
+            'description' => 'nullable|string|max:1000',
+            'website' => 'nullable|url|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $user->name = $request->name;
+        $user->email = $request->email;
+        
+        if ($request->has('phone')) {
+            $user->phone = $request->phone;
+        }
+
+        if ($request->hasFile('profile_photo')) {
+            $file = $request->file('profile_photo');
+            $path = $file->store('profile-photos', 'public');
+            $user->profile_photo = '/storage/' . $path;
+        }
+
+        $user->save();
+
+        // Update shop owner fields if user is a shop owner
+        if ($user->role === 'shop_owner' && $user->shopOwner) {
+            $shopOwner = $user->shopOwner;
+            
+            if ($request->has('shop_name')) {
+                $shopOwner->shop_name = $request->shop_name;
+            }
+            if ($request->has('location')) {
+                $shopOwner->location = $request->location;
+            }
+            if ($request->has('address')) {
+                $shopOwner->address = $request->address;
+            }
+            if ($request->has('shop_phone')) {
+                $shopOwner->phone = $request->shop_phone;
+            }
+            if ($request->has('business_type')) {
+                $shopOwner->business_type = $request->business_type;
+            }
+            if ($request->has('tax_id')) {
+                $shopOwner->tax_id = $request->tax_id;
+            }
+            if ($request->has('description')) {
+                $shopOwner->description = $request->description;
+            }
+            if ($request->has('website')) {
+                $shopOwner->website = $request->website;
+            }
+            
+            $shopOwner->save();
+        }
+
+        // Load relationships based on role
+        if ($user->role === 'shop_owner') {
+            $user->load('shopOwner');
+        } elseif ($user->role === 'staff') {
+            $user->load('staff.shopOwner');
+        }
+
+        return response()->json([
+            'message' => 'Profile updated successfully',
+            'user' => $user->toArray(),
+        ]);
+    }
 }

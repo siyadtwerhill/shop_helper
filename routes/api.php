@@ -55,6 +55,7 @@ Route::post('/shop-owner/register', [AuthController::class, 'shopOwnerRegister']
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/profile', [AuthController::class, 'updateProfile']);
 
     Route::get('/users', [UserController::class, 'index']);
     Route::get('/users/{id}', [UserController::class, 'show']);

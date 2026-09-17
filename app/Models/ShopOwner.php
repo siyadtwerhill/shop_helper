@@ -16,6 +16,12 @@ class ShopOwner extends Authenticatable
         'user_id',
         'shop_name',
         'location',
+        'address',
+        'phone',
+        'business_type',
+        'tax_id',
+        'description',
+        'website',
         'plan_id',
         'staff_count',
     ];
