@@ -14,12 +14,14 @@ use Spatie\Permission\PermissionRegistrar;
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     $user = $request->user();
-    
-    // Load relationships based on role
+
+    // Load relationships based on role.
+    // .plan is nested on so the frontend can show the shop's plan name
+    // (e.g. on the profile page) without a second request.
     if ($user->role === 'shop_owner') {
-        $user->load('shopOwner');
+        $user->load('shopOwner.plan');
     } elseif ($user->role === 'staff') {
-        $user->load('staff.shopOwner');
+        $user->load('staff.shopOwner.plan');
     }
 
     // Add permissions to the user response

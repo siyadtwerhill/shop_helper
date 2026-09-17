@@ -35,7 +35,13 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::where('email', $request->email)->with('shopOwner')->first();
+        // .plan is nested on both possible paths so the frontend can show
+        // the shop's plan name (e.g. on the profile page) right after
+        // login, without a second request. Whichever path doesn't apply
+        // to this user's role just resolves to null.
+        $user = User::where('email', $request->email)
+            ->with(['shopOwner.plan', 'staff.shopOwner.plan'])
+            ->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json(['message' => 'Invalid credentials'], 401);
@@ -138,7 +144,7 @@ class AuthController extends Controller
     public function updateProfile(Request $request)
     {
         $user = $request->user();
-        
+
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|email|max:255|unique:users,email,' . $user->id,
@@ -161,7 +167,7 @@ class AuthController extends Controller
 
         $user->name = $request->name;
         $user->email = $request->email;
-        
+
         if ($request->has('phone')) {
             $user->phone = $request->phone;
         }
@@ -177,7 +183,7 @@ class AuthController extends Controller
         // Update shop owner fields if user is a shop owner
         if ($user->role === 'shop_owner' && $user->shopOwner) {
             $shopOwner = $user->shopOwner;
-            
+
             if ($request->has('shop_name')) {
                 $shopOwner->shop_name = $request->shop_name;
             }
@@ -202,15 +208,17 @@ class AuthController extends Controller
             if ($request->has('website')) {
                 $shopOwner->website = $request->website;
             }
-            
+
             $shopOwner->save();
         }
 
-        // Load relationships based on role
+        // Load relationships based on role.
+        // .plan is nested on so the profile response includes the shop's
+        // plan name without a separate request.
         if ($user->role === 'shop_owner') {
-            $user->load('shopOwner');
+            $user->load('shopOwner.plan');
         } elseif ($user->role === 'staff') {
-            $user->load('staff.shopOwner');
+            $user->load('staff.shopOwner.plan');
         }
 
         return response()->json([
