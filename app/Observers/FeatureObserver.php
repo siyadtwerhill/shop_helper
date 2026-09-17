@@ -3,7 +3,7 @@
 namespace App\Observers;
 
 use App\Models\Feature;
-use Spatie\Permission\Models\Permission;
+use App\Models\Permission;
 
 class FeatureObserver
 {

@@ -17,6 +17,6 @@ class Feature extends Model
 
     public function permissions(): HasMany
     {
-        return $this->hasMany(\Spatie\Permission\Models\Permission::class, 'feature_id');
+        return $this->hasMany(Permission::class, 'feature_id');
     }
 }

@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Spatie\Permission\PermissionRegistrar;
 
 class AuthController extends Controller
 {
@@ -34,7 +35,7 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('email', $request->email)->with('shopOwner')->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json(['message' => 'Invalid credentials'], 401);
@@ -45,6 +46,9 @@ class AuthController extends Controller
         // Build user data with permissions
         $userData = $user->toArray();
         if ($user->role === 'staff') {
+            if ($shopId = $user->staff?->shop_owner_id) {
+                app(PermissionRegistrar::class)->setPermissionsTeamId($shopId);
+            }
             $userData['permissions'] = $user->getAllPermissions()->pluck('name')->toArray();
         } else {
             // Shop owners and superadmins have all permissions

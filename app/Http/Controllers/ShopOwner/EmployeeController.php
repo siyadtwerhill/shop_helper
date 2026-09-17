@@ -5,6 +5,7 @@ namespace App\Http\Controllers\ShopOwner;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\EmployeeInvitation;
+use App\Models\Role;
 use App\Models\Staff;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -12,7 +13,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Spatie\Permission\Models\Role;
+use Illuminate\Validation\Rule;
 use Spatie\Permission\PermissionRegistrar;
 
 class EmployeeController extends Controller
@@ -39,7 +40,10 @@ class EmployeeController extends Controller
     {
         $shop = $this->shop($request);
 
-        $query = Staff::with(['user', 'branch'])
+        // Set team context for proper role loading
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+
+        $query = Staff::with(['user.roles', 'branch'])
             ->where('shop_owner_id', $shop->id);
 
         // Apply branch scope automatically via BelongsToBranch trait
@@ -58,7 +62,7 @@ class EmployeeController extends Controller
                 ->orWhere('email', 'like', '%' . addcslashes($term, '%_') . '%'));
         }
 
-        $employees = $query->latest()->paginate(20);
+        $employees = $query->latest()->get();
 
         // Count should respect branch scope too
         $totalCountQuery = Staff::where('shop_owner_id', $shop->id);
@@ -85,10 +89,13 @@ class EmployeeController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|max:255|unique:users,email',
             'phone' => 'nullable|string|max:255',
-            'role' => 'required|string|exists:roles,name',
+            'role_id' => [
+                'required',
+                'integer',
+                Rule::exists('roles', 'id')->where(fn ($query) => $query->where('shop_owner_id', $shop->id)),
+            ],
             'branch_id' => 'nullable|exists:branches,id',
             'send_invite' => 'boolean',
-            'temp_password' => 'required_if:send_invite,false|nullable|string|min:8',
         ]);
 
         // Enforce the shop's plan max_staff limit
@@ -101,44 +108,86 @@ class EmployeeController extends Controller
             }
         }
 
-        $role = Role::where('name', $data['role'])->where('shop_owner_id', $shop->id)->firstOrFail();
-
-        if ($data['send_invite'] ?? true) {
-            $invitation = EmployeeInvitation::createFor($shop, [
-                'name' => $data['name'],
-                'email' => $data['email'],
-                'phone' => $data['phone'] ?? null,
-                'role_id' => $role->id,
-                'branch_id' => $data['branch_id'] ?? null,
-            ]);
-
-            // Mail::to($invitation->email)->send(new EmployeeInviteMail($invitation));
-
-            return response()->json(['message' => 'Invite sent.', 'invitation' => $invitation], 201);
+        try {
+            $role = Role::where('shop_owner_id', $shop->id)
+                ->where('id', $data['role_id'])
+                ->firstOrFail();
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['message' => 'Role not found for this shop'], 422);
         }
 
-        // Direct creation with a temporary password
+        if ($data['send_invite'] ?? true) {
+            // Create the user immediately with default password, then send invite
+            $username = $this->uniqueUsername($data['name']);
+            $defaultPassword = '12345678'; // Default password for all employees
+
+            try {
+                $user = User::create([
+                    'name' => $data['name'],
+                    'username' => $username,
+                    'email' => $data['email'],
+                    'password' => Hash::make($defaultPassword),
+                    'role' => 'staff',
+                ]);
+
+                $staff = Staff::create([
+                    'user_id' => $user->id,
+                    'shop_owner_id' => $shop->id,
+                    'branch_id' => $data['branch_id'] ?? null,
+                    'phone' => $data['phone'] ?? null,
+                    'status' => 'active',
+                ]);
+
+                // Set the team context for role assignment
+                app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+                $user->assignRole($role);
+
+                // Create invitation record for tracking
+                $invitation = EmployeeInvitation::createFor($shop, [
+                    'name' => $data['name'],
+                    'email' => $data['email'],
+                    'phone' => $data['phone'] ?? null,
+                    'role_id' => $role->id,
+                    'branch_id' => $data['branch_id'] ?? null,
+                ]);
+
+                // Mail::to($invitation->email)->send(new EmployeeInviteMail($invitation));
+
+                return response()->json(['message' => 'Employee added with default password: 12345678', 'staff' => $staff->load('user.roles', 'branch')], 201);
+            } catch (\Exception $e) {
+                return response()->json(['message' => 'Failed to create employee: ' . $e->getMessage()], 500);
+            }
+        }
+
+        // Direct creation with default password
         $username = $this->uniqueUsername($data['name']);
+        $defaultPassword = '12345678'; // Default password for all employees
 
-        $user = User::create([
-            'name' => $data['name'],
-            'username' => $username,
-            'email' => $data['email'],
-            'password' => Hash::make($data['temp_password']),
-            'role' => 'staff',
-        ]);
+        try {
+            $user = User::create([
+                'name' => $data['name'],
+                'username' => $username,
+                'email' => $data['email'],
+                'password' => Hash::make($defaultPassword),
+                'role' => 'staff',
+            ]);
 
-        $staff = Staff::create([
-            'user_id' => $user->id,
-            'shop_owner_id' => $shop->id,
-            'branch_id' => $data['branch_id'] ?? null,
-            'phone' => $data['phone'] ?? null,
-            'status' => 'active',
-        ]);
+            $staff = Staff::create([
+                'user_id' => $user->id,
+                'shop_owner_id' => $shop->id,
+                'branch_id' => $data['branch_id'] ?? null,
+                'phone' => $data['phone'] ?? null,
+                'status' => 'active',
+            ]);
 
-        $user->assignRole($role);
+            // Set the team context for role assignment
+            app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+            $user->assignRole($role);
 
-        return response()->json(['message' => 'Employee added.', 'staff' => $staff->load('user', 'branch')], 201);
+            return response()->json(['message' => 'Employee added with default password: 12345678', 'staff' => $staff->load('user.roles', 'branch')], 201);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Failed to create employee: ' . $e->getMessage()], 500);
+        }
     }
 
     public function update(Request $request, Staff $staff)
@@ -155,7 +204,11 @@ class EmployeeController extends Controller
         $data = $request->validate([
             'name' => 'sometimes|string|max:255',
             'phone' => 'nullable|string|max:255',
-            'role' => 'sometimes|string|exists:roles,name',
+            'role_id' => [
+                'sometimes',
+                'integer',
+                Rule::exists('roles', 'id')->where(fn ($query) => $query->where('shop_owner_id', $shop->id)),
+            ],
             'branch_id' => 'nullable|exists:branches,id',
             'status' => 'sometimes|in:active,inactive',
         ]);
@@ -166,8 +219,10 @@ class EmployeeController extends Controller
 
         $staff->update($request->only(['phone', 'branch_id', 'status']));
 
-        if (isset($data['role'])) {
-            $role = Role::where('name', $data['role'])->where('shop_owner_id', $shop->id)->firstOrFail();
+        if (isset($data['role_id'])) {
+            $role = Role::where('shop_owner_id', $shop->id)
+                ->where('id', $data['role_id'])
+                ->firstOrFail();
             $staff->user->syncRoles([$role]);
         }
 

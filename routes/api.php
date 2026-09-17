@@ -10,17 +10,35 @@ use App\Http\Controllers\Admin\PlanController;
 use App\Http\Controllers\ShopOwner\EmployeeController;
 use App\Http\Controllers\ShopOwner\RoleController;
 use App\Http\Controllers\ShopOwner\BranchController;
+use Spatie\Permission\PermissionRegistrar;
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     $user = $request->user();
+    
+    // Load relationships based on role
+    if ($user->role === 'shop_owner') {
+        $user->load('shopOwner');
+    } elseif ($user->role === 'staff') {
+        $user->load('staff.shopOwner');
+    }
 
     // Add permissions to the user response
     $userData = $user->toArray();
     if ($user->role === 'staff') {
+        if ($shopId = $user->staff?->shop_owner_id) {
+            app(PermissionRegistrar::class)->setPermissionsTeamId($shopId);
+        }
         $userData['permissions'] = $user->getAllPermissions()->pluck('name')->toArray();
     } else {
         // Shop owners and superadmins have all permissions
         $userData['permissions'] = [];
+    }
+
+    // Attach role-specific context
+    if ($user->role === 'shop_owner') {
+        $userData['shop_owner'] = $user->shopOwner;
+    } elseif ($user->role === 'staff') {
+        $userData['staff'] = $user->staff;
     }
 
     return $userData;

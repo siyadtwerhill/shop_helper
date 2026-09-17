@@ -4,10 +4,13 @@ namespace App\Http\Controllers\ShopOwner;
 
 use App\Http\Controllers\Controller;
 use App\Models\Module;
+use App\Models\Permission;
+use App\Models\Role;
 use App\Models\Staff;
+use App\Models\User;
 use Illuminate\Http\Request;
-use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Spatie\Permission\PermissionRegistrar;
 
 class RoleController extends Controller
@@ -32,15 +35,22 @@ class RoleController extends Controller
     {
         $shop = $this->shop($request);
 
-        $roles = Role::where('shop_owner_id', $shop->id)
-            ->withCount('users')
-            ->get()
-            ->map(fn ($role) => [
-                'id' => $role->id,
-                'name' => $role->name,
-                'description' => $role->description,
-                'employee_count' => $role->users_count,
-            ]);
+        $roleModels = Role::where('shop_owner_id', $shop->id)->get();
+
+        $employeeCounts = Staff::query()
+            ->join('model_has_roles', 'staff.user_id', '=', 'model_has_roles.model_id')
+            ->where('staff.shop_owner_id', $shop->id)
+            ->where('model_has_roles.model_type', User::class)
+            ->whereIn('model_has_roles.role_id', $roleModels->pluck('id'))
+            ->groupBy('model_has_roles.role_id')
+            ->pluck(DB::raw('count(*)'), 'model_has_roles.role_id');
+
+        $roles = $roleModels->map(fn ($role) => [
+            'id' => $role->id,
+            'name' => $role->name,
+            'description' => $role->description,
+            'employee_count' => (int) ($employeeCounts[$role->id] ?? 0),
+        ]);
 
         return response()->json(['roles' => $roles]);
     }
@@ -84,7 +94,12 @@ class RoleController extends Controller
         $shop = $this->shop($request);
 
         $data = $request->validate([
-            'name' => 'required|string|max:255',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('roles', 'name')->where(fn ($query) => $query->where('shop_owner_id', $shop->id)),
+            ],
             'description' => 'nullable|string|max:255',
         ]);
 
@@ -151,7 +166,19 @@ class RoleController extends Controller
         $shop = $this->shop($request);
         abort_if($role->shop_owner_id !== $shop->id, 403);
 
-        if (Staff::whereHas('user.roles', fn ($q) => $q->where('roles.id', $role->id))->exists()) {
+        // Prevent deletion of system roles
+        if ($role->is_system) {
+            return response()->json(['message' => 'Cannot delete system roles.'], 422);
+        }
+
+        $hasAssignedEmployees = Staff::query()
+            ->join('model_has_roles', 'staff.user_id', '=', 'model_has_roles.model_id')
+            ->where('staff.shop_owner_id', $shop->id)
+            ->where('model_has_roles.model_type', User::class)
+            ->where('model_has_roles.role_id', $role->id)
+            ->exists();
+
+        if ($hasAssignedEmployees) {
             return response()->json(['message' => 'Reassign employees off this role before deleting it.'], 422);
         }
 

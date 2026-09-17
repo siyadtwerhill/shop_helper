@@ -40,7 +40,7 @@ class EmployeeInvitation extends Model
 
     public function role(): BelongsTo
     {
-        return $this->belongsTo(\Spatie\Permission\Models\Role::class, 'role_id');
+        return $this->belongsTo(Role::class, 'role_id');
     }
 
     public function branch(): BelongsTo

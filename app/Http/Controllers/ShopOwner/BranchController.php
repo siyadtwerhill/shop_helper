@@ -4,8 +4,10 @@ namespace App\Http\Controllers\ShopOwner;
 
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
+use App\Models\Role;
 use App\Models\Staff;
 use Illuminate\Http\Request;
+use Spatie\Permission\PermissionRegistrar;
 
 class BranchController extends Controller
 {
@@ -130,15 +132,20 @@ class BranchController extends Controller
      * Choosing a Branch Head assigns that staff member to this branch
      * (sets their staff.branch_id) — the mockup's tooltip promises this
      * exact behavior, so it's not just a label: appointing someone here
-     * also grants them the branch_head role, giving Branch Head real
+     * also grants them the Branch Head role, giving Branch Head real
      * scoped authority rather than being purely cosmetic.
      */
     private function assignHead(Branch $branch, ?int $staffId): void
     {
+        $shop = $branch->shopOwner;
+        
         // Clear the previous head's role if they're being replaced
         if ($branch->head_staff_id && $branch->head_staff_id !== $staffId) {
             $previousHead = Staff::find($branch->head_staff_id);
-            $previousHead?->user?->removeRole('branch_head');
+            if ($previousHead) {
+                app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+                $previousHead->user->removeRole('Branch Head');
+            }
         }
 
         $branch->update(['head_staff_id' => $staffId]);
@@ -146,7 +153,16 @@ class BranchController extends Controller
         if ($staffId) {
             $staff = Staff::findOrFail($staffId);
             $staff->update(['branch_id' => $branch->id]);
-            $staff->user->assignRole('branch_head');
+            
+            // Assign Branch Head role with team context
+            app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+            $branchHeadRole = \App\Models\Role::where('shop_owner_id', $shop->id)
+                ->where('name', 'Branch Head')
+                ->first();
+            
+            if ($branchHeadRole) {
+                $staff->user->syncRoles([$branchHeadRole]);
+            }
         }
     }
 }

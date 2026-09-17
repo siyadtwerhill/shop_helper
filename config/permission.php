@@ -4,6 +4,7 @@ return [
     'models' => [
         'permission' => App\Models\Permission::class,
         'role' => App\Models\Role::class,
+        'user' => App\Models\User::class,
     ],
 
     'table_names' => [
@@ -21,8 +22,7 @@ return [
         'team_foreign_key' => 'shop_owner_id',
     ],
 
-    'teams' => false, // Temporarily disabled to fix permission system
-
+    'teams' => true,
     'display_permission' => 'name',
     'display_role' => 'name',
 
