@@ -2,11 +2,14 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\SubscriptionController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\FeatureController;
 use App\Http\Controllers\Admin\ModuleController;
 use App\Http\Controllers\Admin\PlanController;
+use App\Http\Controllers\Admin\SubscriptionController as AdminSubscriptionController;
+use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\ShopOwner\EmployeeController;
 use App\Http\Controllers\ShopOwner\RoleController;
 use App\Http\Controllers\ShopOwner\BranchController;
@@ -59,6 +62,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/profile', [AuthController::class, 'updateProfile']);
 
+    // Shop-owner subscription management
+    Route::get('/subscription', [SubscriptionController::class, 'show']);
+    Route::get('/subscription/payments', [SubscriptionController::class, 'history']);
+    Route::post('/subscription/initiate', [SubscriptionController::class, 'initiate']);
+    Route::post('/subscription/payments/{payment}/proof', [SubscriptionController::class, 'uploadProof']);
+    Route::post('/subscription/downgrade', [SubscriptionController::class, 'scheduleDowngrade']);
+
     Route::get('/users', [UserController::class, 'index']);
     Route::get('/users/{id}', [UserController::class, 'show']);
     Route::get('/users/role/{role}', [UserController::class, 'getUsersByRole']);
@@ -105,5 +115,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/plans/{plan}', [PlanController::class, 'show']);
         Route::put('/admin/plans/{plan}', [PlanController::class, 'update']);
         Route::delete('/admin/plans/{plan}', [PlanController::class, 'destroy']);
+
+        // Subscription management
+        Route::get('/admin/subscriptions', [AdminSubscriptionController::class, 'index']);
+        Route::get('/admin/subscriptions/{subscription}', [AdminSubscriptionController::class, 'show']);
+        Route::put('/admin/subscriptions/{subscription}/plan', [AdminSubscriptionController::class, 'changePlan']);
+        Route::post('/admin/subscriptions/{subscription}/extend-trial', [AdminSubscriptionController::class, 'extendTrial']);
+        Route::post('/admin/subscriptions/{subscription}/cancel', [AdminSubscriptionController::class, 'cancel']);
+
+        // Payment verification
+        Route::get('/admin/payments', [PaymentController::class, 'index']);
+        Route::get('/admin/payments/{payment}', [PaymentController::class, 'show']);
+        Route::post('/admin/payments/{payment}/approve', [PaymentController::class, 'approve']);
+        Route::post('/admin/payments/{payment}/reject', [PaymentController::class, 'reject']);
     });
 });
