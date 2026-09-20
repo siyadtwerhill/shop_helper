@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             ModuleSeeder::class,
             FeatureSeeder::class,
             ShopOwnerSeeder::class,
+            PricingPermissionSeeder::class,
         ]);
     }
 }

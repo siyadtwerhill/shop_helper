@@ -3,6 +3,16 @@
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\SubscriptionController;
+use App\Http\Controllers\ProductController;
+use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\BrandController;
+use App\Http\Controllers\Api\ProductUnitController;
+use App\Http\Controllers\Api\UnitController;
+use App\Http\Controllers\Api\InventoryMovementController;
+use App\Http\Controllers\Api\ProductScannerController;
+use App\Http\Controllers\Api\SaleItemController;
+use App\Http\Controllers\Api\PriceQuoteController;
+use App\Http\Controllers\Api\ProductPriceRuleController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\FeatureController;
@@ -22,9 +32,9 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     // .plan is nested on so the frontend can show the shop's plan name
     // (e.g. on the profile page) without a second request.
     if ($user->role === 'shop_owner') {
-        $user->load('shopOwner.plan');
+        $user->load(['shopOwner.plan', 'shopOwner.subscription.plan']);
     } elseif ($user->role === 'staff') {
-        $user->load('staff.shopOwner.plan');
+        $user->load(['staff.shopOwner.plan', 'staff.shopOwner.subscription.plan']);
     }
 
     // Add permissions to the user response
@@ -94,6 +104,42 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/branches', [BranchController::class, 'store']);
     Route::put('/branches/{branch}', [BranchController::class, 'update']);
     Route::delete('/branches/{branch}', [BranchController::class, 'destroy']);
+
+    // ---- Products, Categories, Brands ----
+    Route::get('/products', [ProductController::class, 'index']);
+    Route::post('/products', [ProductController::class, 'store']);
+    Route::get('/products/{product}', [ProductController::class, 'show']);
+    Route::put('/products/{product}', [ProductController::class, 'update']);
+    Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+    Route::post('/products/lookup-barcode', [ProductController::class, 'lookupByBarcode']);
+
+    Route::apiResource('categories', CategoryController::class);
+    Route::apiResource('brands', BrandController::class);
+
+    // ---- Units & Product Units ----
+    Route::apiResource('units', UnitController::class)->except(['show']);
+
+    Route::get('products/{product}/units', [ProductUnitController::class, 'index']);
+    Route::post('products/{product}/units', [ProductUnitController::class, 'store']);
+    Route::put('products/{product}/units/{productUnit}', [ProductUnitController::class, 'update']);
+    Route::delete('products/{product}/units/{productUnit}', [ProductUnitController::class, 'destroy']);
+
+    // ---- Inventory Movements & Scanner ----
+    Route::post('scanner/lookup', [ProductScannerController::class, 'lookup']);
+
+    Route::get('products/{product}/movements', [InventoryMovementController::class, 'index']);
+    Route::post('products/{product}/movements', [InventoryMovementController::class, 'store']);
+
+    // ---- POS Sale Items ----
+    Route::post('pos/sale-items', [SaleItemController::class, 'store']);
+
+    // ---- Pricing ----
+    Route::post('pos/price-quote', [PriceQuoteController::class, 'store']);
+
+    Route::get('products/{product}/price-rules', [ProductPriceRuleController::class, 'index']);
+    Route::post('products/{product}/price-rules', [ProductPriceRuleController::class, 'store']);
+    Route::put('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'update']);
+    Route::delete('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'destroy']);
 
     Route::middleware('superadmin')->group(function () {
         Route::post('/users', [UserController::class, 'store']);

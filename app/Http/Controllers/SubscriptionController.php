@@ -25,6 +25,7 @@ class SubscriptionController extends Controller
                 ->where('status', 'pending_verification')
                 ->latest()
                 ->first(),
+            'current_plan' => $shop->plan,
         ]);
     }
 

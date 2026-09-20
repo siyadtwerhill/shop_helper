@@ -60,6 +60,11 @@ class ShopOwner extends Model
         return $this->hasOne(Subscription::class)->latestOfMany();
     }
 
+    public function activeSubscription()
+    {
+        return $this->hasOne(Subscription::class)->where('status', '!=', 'cancelled')->latestOfMany();
+    }
+
     public function payments()
     {
         return $this->hasMany(Payment::class);
