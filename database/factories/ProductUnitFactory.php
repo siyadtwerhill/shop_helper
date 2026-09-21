@@ -31,6 +31,7 @@ class ProductUnitFactory extends Factory
             'is_base' => true,
             'conversion_factor' => '1.0000',
         ])->afterCreating(function (ProductUnit $unit) {
+            $unit->load('product');
             if ($unit->product) {
                 $unit->product->update(['base_unit_id' => $unit->id]);
             }

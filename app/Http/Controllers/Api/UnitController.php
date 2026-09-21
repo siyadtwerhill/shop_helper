@@ -51,7 +51,7 @@ class UnitController extends Controller
         return response()->json($unit);
     }
 
-    public function destroy(Unit $unit)
+    public function destroy(Request $request, Unit $unit)
     {
         abort_if($unit->is_system, 403, 'System units cannot be deleted.');
         abort_if($unit->shop_owner_id !== $request->user()->shopOwner->id, 403);
