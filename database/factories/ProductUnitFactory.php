@@ -27,7 +27,14 @@ class ProductUnitFactory extends Factory
 
     public function base(): static
     {
-        return $this->state(fn () => ['is_base' => true, 'conversion_factor' => '1.0000']);
+        return $this->state(fn (array $attributes) => [
+            'is_base' => true,
+            'conversion_factor' => '1.0000',
+        ])->afterCreating(function (ProductUnit $unit) {
+            if ($unit->product) {
+                $unit->product->update(['base_unit_id' => $unit->id]);
+            }
+        });
     }
 
     public function forProduct(Product $product): static

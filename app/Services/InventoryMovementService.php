@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\MovementType;
+use App\Events\ProductStockAdjusted;
 use App\Exceptions\InsufficientStockException;
 use App\Models\InventoryMovement;
 use App\Models\Product;
@@ -92,6 +93,8 @@ class InventoryMovementService
                 'note' => $note,
                 'created_by' => $createdBy,
             ]);
+
+            event(new ProductStockAdjusted($product, $movement));
 
             $product->forceFill(['current_stock' => $resultingStock])->save();
 

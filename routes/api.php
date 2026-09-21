@@ -13,6 +13,11 @@ use App\Http\Controllers\Api\ProductScannerController;
 use App\Http\Controllers\Api\SaleItemController;
 use App\Http\Controllers\Api\PriceQuoteController;
 use App\Http\Controllers\Api\ProductPriceRuleController;
+use App\Http\Controllers\Api\ProductVariantController;
+use App\Http\Controllers\Api\ProductBundleController;
+use App\Http\Controllers\Api\BundleSaleItemController;
+use App\Http\Controllers\Api\ProductActivityLogController;
+use App\Http\Controllers\Api\ProductLabelController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\FeatureController;
@@ -140,6 +145,26 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('products/{product}/price-rules', [ProductPriceRuleController::class, 'store']);
     Route::put('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'update']);
     Route::delete('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'destroy']);
+
+    // ---- Variants ----
+    Route::get('products/{product}/variants', [ProductVariantController::class, 'index']);
+    Route::post('products/{product}/variants', [ProductVariantController::class, 'store']);
+    Route::put('products/{product}/variants/{variant}', [ProductVariantController::class, 'update']);
+    Route::delete('products/{product}/variants/{variant}', [ProductVariantController::class, 'destroy']);
+
+    // ---- Bundles ----
+    Route::get('products/{product}/bundle', [ProductBundleController::class, 'show']);
+    Route::post('products/{product}/bundle', [ProductBundleController::class, 'store']);
+    Route::put('products/{product}/bundle', [ProductBundleController::class, 'update']);
+    Route::delete('products/{product}/bundle', [ProductBundleController::class, 'destroy']);
+    Route::post('pos/bundle-sale-items', [BundleSaleItemController::class, 'store']);
+
+    // ---- Activity Logs ----
+    Route::get('products/{product}/activity', [ProductActivityLogController::class, 'index']);
+
+    // ---- Labels ----
+    Route::get('products/{product}/label', [ProductLabelController::class, 'show']);
+    Route::get('products/{product}/variants/{variant}/label', [ProductLabelController::class, 'variant']);
 
     Route::middleware('superadmin')->group(function () {
         Route::post('/users', [UserController::class, 'store']);

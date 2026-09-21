@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Models\ProductUnit;
+use App\Models\ProductBarcode;
+use App\Observers\ProductUnitObserver;
+use App\Observers\ProductBarcodeObserver;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -14,6 +18,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        ProductUnit::observe(ProductUnitObserver::class);
+        ProductBarcode::observe(ProductBarcodeObserver::class);
+
         // Owners and superadmins bypass every Spatie permission check.
         // Feature permissions (employees.list.view, etc.) only ever
         // apply to staff/branch_head — an owner is never blocked by

@@ -7,6 +7,9 @@ use App\Services\SkuGenerator;
 use App\Models\Concerns\HasUnits;
 use App\Models\Concerns\HasInventoryMovements;
 use App\Models\Concerns\HasPriceRules;
+use App\Models\Concerns\HasVariants;
+use App\Models\Concerns\HasBundle;
+use App\Models\Concerns\HasActivityLogs;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,7 +18,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Product extends Model
 {
-    use HasFactory, SoftDeletes, HasUnits, HasInventoryMovements, HasPriceRules;
+    use HasFactory, SoftDeletes, HasUnits, HasInventoryMovements, HasPriceRules, HasVariants, HasBundle, HasActivityLogs;
 
     protected $fillable = [
         'shop_owner_id', 'category_id', 'brand_id',
