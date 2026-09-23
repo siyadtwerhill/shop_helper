@@ -29,11 +29,12 @@ class Product extends Model
     ];
 
     protected $casts = [
-        'current_stock' => 'decimal:4',
         'cost_price' => 'decimal:2',
         'min_margin_percent' => 'decimal:2',
         'min_price' => 'decimal:2',
     ];
+
+    protected $appends = ['qr_url'];
 
     protected static function booted(): void
     {
@@ -65,5 +66,4 @@ class Product extends Model
         return $this->qr_path ? asset('storage/' . $this->qr_path) : null;
     }
 
-    protected $appends = ['qr_url'];
 }

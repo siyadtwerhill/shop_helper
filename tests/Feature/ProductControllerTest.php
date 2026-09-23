@@ -79,6 +79,58 @@ class ProductControllerTest extends TestCase
         $response->assertJsonPath('product.id', $product->id);
     }
 
+    public function test_update_changes_base_unit_selling_price(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+        $product = Product::factory()->for($shop)->create();
+        $unit = \App\Models\ProductUnit::factory()->for($product)->base()->create([
+            'selling_price' => '100.00',
+        ]);
+
+        $response = $this->actingAs($user)->putJson("/api/products/{$product->id}", [
+            'selling_price' => '250.50',
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseHas('product_units', [
+            'id' => $unit->id,
+            'selling_price' => '250.50',
+        ]);
+    }
+
+    public function test_update_via_post_saves_price_unit_conversion_and_stock(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+        $product = Product::factory()->for($shop)->create(['current_stock' => '5.0000']);
+        $productUnit = \App\Models\ProductUnit::factory()->for($product)->base()->create([
+            'selling_price' => '100.00',
+            'conversion_factor' => '1.0000',
+        ]);
+        $newCatalogUnit = \App\Models\Unit::factory()->create();
+
+        $response = $this->actingAs($user)->postJson("/api/products/{$product->id}", [
+            'selling_price' => '250.50',
+            'unit_id' => $newCatalogUnit->id,
+            'conversion_factor' => '2.5000',
+            'current_stock' => '12',
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseHas('product_units', [
+            'id' => $productUnit->id,
+            'selling_price' => '250.50',
+            'unit_id' => $newCatalogUnit->id,
+            'conversion_factor' => '2.5000',
+        ]);
+        $this->assertEquals(0, bccomp((string) $product->fresh()->current_stock, '12', 4));
+    }
+
     public function test_update_modifies_product(): void
     {
         $shop = ShopOwner::factory()->create();

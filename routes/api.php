@@ -18,6 +18,11 @@ use App\Http\Controllers\Api\ProductBundleController;
 use App\Http\Controllers\Api\BundleSaleItemController;
 use App\Http\Controllers\Api\ProductActivityLogController;
 use App\Http\Controllers\Api\ProductLabelController;
+use App\Http\Controllers\Api\ActivityFeedController;
+use App\Http\Controllers\Api\BundleListController;
+use App\Http\Controllers\Api\PosSaleController;
+use App\Http\Controllers\Api\SalesController;
+use App\Http\Controllers\Api\CustomerController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\FeatureController;
@@ -113,10 +118,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // ---- Products, Categories, Brands ----
     Route::get('/products', [ProductController::class, 'index']);
     Route::post('/products', [ProductController::class, 'store']);
-    Route::get('/products/{product}', [ProductController::class, 'show']);
-    Route::put('/products/{product}', [ProductController::class, 'update']);
-    Route::delete('/products/{product}', [ProductController::class, 'destroy']);
     Route::post('/products/lookup-barcode', [ProductController::class, 'lookupByBarcode']);
+    Route::get('/products/{product}', [ProductController::class, 'show']);
+    // POST is accepted so multipart FormData from the edit screen can be parsed
+    // (PHP does not populate files/input on a real PUT).
+    Route::match(['put', 'patch', 'post'], '/products/{product}', [ProductController::class, 'update']);
+    Route::delete('/products/{product}', [ProductController::class, 'destroy']);
 
     Route::apiResource('categories', CategoryController::class);
     Route::apiResource('brands', BrandController::class);
@@ -165,6 +172,26 @@ Route::middleware('auth:sanctum')->group(function () {
     // ---- Labels ----
     Route::get('products/{product}/label', [ProductLabelController::class, 'show']);
     Route::get('products/{product}/variants/{variant}/label', [ProductLabelController::class, 'variant']);
+
+    // ---- Global Activity Feed ----
+    Route::get('activity', [ActivityFeedController::class, 'index']);
+
+    // ---- All Bundles ----
+    Route::get('bundles', [BundleListController::class, 'index']);
+
+    // ---- POS Sales ----
+    Route::post('pos/sales', [PosSaleController::class, 'store']);
+
+    // ---- Sales ----
+    Route::get('sales/overview', [SalesController::class, 'overview']);
+    Route::get('sales', [SalesController::class, 'index']);
+    Route::post('sales', [SalesController::class, 'store']);
+    Route::get('sales/{sale}', [SalesController::class, 'show']);
+    Route::put('sales/{sale}', [SalesController::class, 'update']);
+    Route::delete('sales/{sale}', [SalesController::class, 'destroy']);
+
+    // ---- Customers ----
+    Route::apiResource('customers', CustomerController::class);
 
     Route::middleware('superadmin')->group(function () {
         Route::post('/users', [UserController::class, 'store']);

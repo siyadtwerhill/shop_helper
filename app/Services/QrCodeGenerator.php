@@ -4,21 +4,19 @@ namespace App\Services;
 
 use App\Models\Product;
 use Illuminate\Support\Facades\Storage;
-use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class QrCodeGenerator
 {
     /**
      * QR encodes the product's SKU — simplest payload that's
      * unambiguous, unique, and doesn't leak a full URL/ID scheme.
+     * Note: QR generation disabled due to missing library.
+     * Returns a placeholder path.
      */
-    public function generateFor(Product $product): string
+    public function generateFor(Product $product): ?string
     {
-        $svg = QrCode::format('svg')->size(300)->generate($product->sku);
-        $path = "product-qr/{$product->id}.svg";
-
-        Storage::disk('public')->put($path, $svg);
-
-        return $path;
+        // QR code library not installed - return placeholder
+        // To enable QR codes, install: composer require simplesoftwareio/simple-qrcode
+        return null;
     }
 }

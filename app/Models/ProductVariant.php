@@ -26,6 +26,8 @@ class ProductVariant extends Model
         'purchase_price' => 'decimal:2',
     ];
 
+    protected $appends = ['display_label', 'current_stock'];
+
     public function product()
     {
         return $this->belongsTo(Product::class);
@@ -36,10 +38,21 @@ class ProductVariant extends Model
         return $this->hasMany(ProductBarcode::class, 'product_variant_id');
     }
 
+    public function inventoryMovements()
+    {
+        return $this->hasMany(InventoryMovement::class, 'variant_id');
+    }
+
     /** "Black / S" style label from the attributes json. */
     public function getDisplayLabelAttribute(): string
     {
         $attrs = $this->getAttribute('attributes');
         return collect($attrs ?? [])->implode(' / ');
+    }
+
+    /** Computed from the ledger — variants don't have their own stock column (design #5's Stock column). */
+    public function getCurrentStockAttribute(): string
+    {
+        return $this->inventoryMovements()->sum('base_quantity') ?: '0.0000';
     }
 }
