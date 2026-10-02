@@ -45,6 +45,16 @@ class ShopOwner extends Model
         return $this->hasMany(\App\Models\Staff::class);
     }
 
+    public function blueprints()
+    {
+        return $this->hasMany(Blueprint::class);
+    }
+
+    public function products()
+    {
+        return $this->hasMany(Product::class);
+    }
+
     public function plan()
     {
         return $this->belongsTo(Plan::class);

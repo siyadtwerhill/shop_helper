@@ -8,8 +8,12 @@ use App\Models\Product;
 use App\Models\ProductBarcode;
 use App\Models\ShopOwner;
 use App\Models\User;
+use App\Models\Staff;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
+use App\Models\Branch;
+use Spatie\Permission\PermissionRegistrar;
 
 class ProductControllerTest extends TestCase
 {
@@ -199,5 +203,50 @@ class ProductControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('found', false);
         $response->assertJsonPath('barcode', '0000000000000');
+    }
+
+    public function test_branch_head_only_sees_their_branch_products(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $branch1 = Branch::factory()->create(['shop_owner_id' => $shop->id]);
+        $branch2 = Branch::factory()->create(['shop_owner_id' => $shop->id]);
+
+        // Create branch head user manually
+        $branchHeadUser = User::create([
+            'name' => 'Branch Head',
+            'username' => 'branch_head',
+            'email' => 'head@example.com',
+            'password' => bcrypt('password'),
+            'role' => 'staff',
+        ]);
+
+        $branchHead = Staff::create([
+            'user_id' => $branchHeadUser->id,
+            'shop_owner_id' => $shop->id,
+            'branch_id' => $branch1->id,
+            'status' => 'active',
+        ]);
+
+        // Set team context for permissions
+        app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+
+        // Assign branch_head role
+        $branchHeadRole = \Spatie\Permission\Models\Role::create([
+            'name' => 'branch_head',
+            'guard_name' => 'web',
+            'shop_owner_id' => $shop->id,
+        ]);
+        $branchHeadUser->assignRole($branchHeadRole);
+
+        // Create products in both branches
+        Product::factory()->for($shop)->forBranch($branch1->id)->create(['name' => 'Branch 1 Product']);
+        Product::factory()->for($shop)->forBranch($branch2->id)->create(['name' => 'Branch 2 Product']);
+
+        $response = $this->actingAs($branchHeadUser)->getJson('/api/products');
+
+        $response->assertOk();
+        $products = $response->json('products.data');
+        $this->assertCount(1, $products);
+        $this->assertEquals('Branch 1 Product', $products[0]['name']);
     }
 }

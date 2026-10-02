@@ -44,7 +44,7 @@ class InventoryMovementService
 
             if (! $allowNegativeStock && bccomp($resultingStock, '0', 4) < 0) {
                 throw new InsufficientStockException(
-                    "Recording this {$type->value} would take product #{$product->id} below zero stock ({$resultingStock})."
+                    "Recording this {$type->value} would take \"{$product->name}\" (product #{$product->id}) below zero stock ({$resultingStock})."
                 );
             }
 
@@ -109,9 +109,9 @@ class InventoryMovementService
         return $this->record($p, $u, MovementType::Purchase, $qty, $referenceType, $referenceId, $createdBy, allowNegativeStock: true);
     }
 
-    public function sale(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null): InventoryMovement
+    public function sale(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null, bool $allowNegativeStock = false): InventoryMovement
     {
-        return $this->record($p, $u, MovementType::Sale, $qty, $referenceType, $referenceId, $createdBy);
+        return $this->record($p, $u, MovementType::Sale, $qty, $referenceType, $referenceId, $createdBy, allowNegativeStock: $allowNegativeStock);
     }
 
     public function saleReturn(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null): InventoryMovement

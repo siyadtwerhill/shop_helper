@@ -5,14 +5,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Services\BundleSaleService;
 use App\Services\SaleItemService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class PosSaleController extends Controller
 {
-    public function __construct(private SaleItemService $saleItems)
-    {
+    public function __construct(
+        private SaleItemService $saleItems,
+        private BundleSaleService $bundleSales
+    ) {
     }
 
     /**
@@ -48,14 +51,41 @@ class PosSaleController extends Controller
                 $product = Product::findOrFail($item['product_id']);
                 $unit = $product->units()->findOrFail($item['unit_id']);
 
-                $this->saleItems->sell(
-                    $product,
-                    $unit,
-                    $item['quantity'],
-                    (string) $item['unit_price'],
-                    $sale->id,
-                    createdBy: $request->user()->id,
-                );
+                // Check if this is a bundle
+                $bundle = $product->bundle()->first();
+                
+                if ($bundle) {
+                    // Bundle sale: deduct from components, not the bundle itself
+                    $this->saleItems->sell(
+                        $product,
+                        $unit,
+                        $item['quantity'],
+                        (string) $item['unit_price'],
+                        $sale->id,
+                        createdBy: $request->user()->id,
+                        allowNegativeStock: true, // Bundles don't track their own stock
+                    );
+                    
+                    // Deduct from component products
+                    $this->bundleSales->deductComponents(
+                        $bundle,
+                        $item['quantity'],
+                        createdBy: $request->user()->id,
+                        referenceType: Sale::class,
+                        referenceId: $sale->id,
+                        allowNegativeStock: false, // Components should have stock
+                    );
+                } else {
+                    // Regular product sale
+                    $this->saleItems->sell(
+                        $product,
+                        $unit,
+                        $item['quantity'],
+                        (string) $item['unit_price'],
+                        $sale->id,
+                        createdBy: $request->user()->id,
+                    );
+                }
 
                 $subtotal = bcadd($subtotal, bcmul((string) $item['quantity'], (string) $item['unit_price'], 2), 2);
             }

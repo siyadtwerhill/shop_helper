@@ -50,11 +50,16 @@ class ProductController extends Controller
         $shop = $this->shop($request);
 
         $query = Product::where('shop_owner_id', $shop->id)
-            ->with(['category', 'brand', 'barcodes', 'baseUnit.unit'])
+            ->with(['category', 'brand', 'barcodes', 'baseUnit.unit', 'branch'])
             // variant count + price range for the list's Price column
             ->withCount('variants')
             ->withMin('variants', 'selling_price')
             ->withMax('variants', 'selling_price');
+
+        // Apply branch scope for branch heads
+        if ($request->user()->isBranchHead() && $request->user()->staff?->branch_id) {
+            $query->where('branch_id', $request->user()->staff->branch_id);
+        }
 
         if ($request->filled('search')) {
             $term = $request->search;
@@ -88,7 +93,7 @@ class ProductController extends Controller
         $this->ownedProduct($request, $product);
 
         return response()->json([
-            'product' => $product->load(['category', 'brand', 'barcodes', 'units.unit', 'baseUnit.unit']),
+            'product' => $product->load(['category', 'brand', 'barcodes', 'units.unit', 'baseUnit.unit', 'bundle.items.component', 'bundle.items.unit']),
         ]);
     }
 
@@ -104,14 +109,23 @@ class ProductController extends Controller
             'brand_id' => 'nullable|exists:brands,id',
             'image' => 'nullable|image|max:2048',
             'status' => 'nullable|in:active,inactive,archived',
+            'product_type' => 'required|in:neutral,variant,bundle',
             'scanned_barcode' => 'nullable|string|max:64|unique:product_barcodes,barcode',
+            'branch_id' => 'nullable|exists:branches,id',
 
-            // Pricing — essential, always sent
-            'pricing_mode' => 'required|in:fixed,negotiable,price_range,wholesale',
+            // Pricing — essential for neutral, optional for variant, bundle has its own
+            'pricing_mode' => 'nullable|in:fixed,negotiable,price_range,wholesale',
             'cost_price' => 'nullable|numeric|min:0',
             'selling_price' => 'required|numeric|min:0',
             'min_margin_percent' => 'nullable|numeric|min:0|max:100',
             'min_price' => 'nullable|numeric|min:0',
+
+            // Bundle-specific
+            'bundle_price' => 'nullable|numeric|min:0|required_if:product_type,bundle',
+            'bundle_items' => 'nullable|array|required_if:product_type,bundle',
+            'bundle_items.*.component_product_id' => 'required_with:bundle_items|exists:products,id',
+            'bundle_items.*.unit_id' => 'required_with:bundle_items|exists:product_units,id',
+            'bundle_items.*.quantity' => 'required_with:bundle_items|integer|min:1',
 
             // Base unit — required by the schema, but the frontend fills this
             // with a sensible default unless the user opens Additional Settings.
@@ -126,15 +140,23 @@ class ProductController extends Controller
         ]);
 
         $product = DB::transaction(function () use ($data, $shop, $request) {
+            // Determine branch_id based on user role
+            $branchId = $data['branch_id'] ?? null;
+            if ($request->user()->isBranchHead() && $request->user()->staff?->branch_id) {
+                $branchId = $request->user()->staff->branch_id;
+            }
+
             $product = Product::create([
                 'shop_owner_id' => $shop->id,
+                'branch_id' => $branchId,
                 'category_id' => $data['category_id'] ?? null,
                 'brand_id' => $data['brand_id'] ?? null,
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
                 'internal_notes' => $data['internal_notes'] ?? null,
                 'status' => $data['status'] ?? 'active',
-                'pricing_mode' => $data['pricing_mode'],
+                'product_type' => $data['product_type'] ?? 'neutral',
+                'pricing_mode' => $data['pricing_mode'] ?? 'fixed',
                 'cost_price' => $data['cost_price'] ?? null,
                 'min_margin_percent' => $data['min_margin_percent'] ?? null,
                 'min_price' => $data['min_price'] ?? null,
@@ -191,6 +213,21 @@ class ProductController extends Controller
                 app(\App\Services\InventoryMovementService::class)->openingStock(
                     $product, $unit, $data['opening_stock'], $request->user()->id
                 );
+            }
+
+            // Handle bundle creation if product_type is bundle
+            if ($data['product_type'] === 'bundle' && !empty($data['bundle_items'])) {
+                $bundle = $product->bundle()->create([
+                    'bundle_price' => $data['bundle_price'] ?? $data['selling_price'],
+                ]);
+
+                foreach ($data['bundle_items'] as $item) {
+                    $bundle->items()->create([
+                        'component_product_id' => $item['component_product_id'],
+                        'unit_id' => $item['unit_id'],
+                        'quantity' => $item['quantity'],
+                    ]);
+                }
             }
 
             return $product;
@@ -352,15 +389,30 @@ class ProductController extends Controller
     {
         $data = $request->validate(['barcode' => 'required|string']);
 
+        \Log::info('Barcode lookup request', ['barcode' => $data['barcode'], 'shop_id' => $this->shop($request)->id]);
+
         $barcode = ProductBarcode::where('barcode', $data['barcode'])
             ->whereHas('product', fn ($q) => $q->where('shop_owner_id', $this->shop($request)->id))
-            ->with('product.category', 'product.brand')
+            ->with('product.category', 'product.brand', 'product.baseUnit')
             ->first();
 
         if (!$barcode) {
+            // Try with trimmed barcode (sometimes scanners add spaces)
+            $trimmedBarcode = trim($data['barcode']);
+            \Log::info('Trying trimmed barcode', ['original' => $data['barcode'], 'trimmed' => $trimmedBarcode]);
+            
+            $barcode = ProductBarcode::where('barcode', $trimmedBarcode)
+                ->whereHas('product', fn ($q) => $q->where('shop_owner_id', $this->shop($request)->id))
+                ->with('product.category', 'product.brand', 'product.baseUnit')
+                ->first();
+        }
+
+        if (!$barcode) {
+            \Log::warning('Barcode not found', ['barcode' => $data['barcode']]);
             return response()->json(['found' => false, 'barcode' => $data['barcode']]);
         }
 
+        \Log::info('Barcode found', ['barcode' => $data['barcode'], 'product_id' => $barcode->product->id]);
         return response()->json(['found' => true, 'product' => $barcode->product]);
     }
 }

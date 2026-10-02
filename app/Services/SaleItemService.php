@@ -29,6 +29,7 @@ class SaleItemService
         ?string $originalUnitPrice = null,
         string $discountAmount = '0.00',
         ?int $createdBy = null,
+        bool $allowNegativeStock = false,
     ): SaleItem {
         if (! $productUnit->is_sellable) {
             throw new InvalidArgumentException(
@@ -36,7 +37,7 @@ class SaleItemService
             );
         }
 
-        return DB::transaction(function () use ($product, $productUnit, $quantity, $unitPrice, $saleId, $originalUnitPrice, $discountAmount, $createdBy) {
+        return DB::transaction(function () use ($product, $productUnit, $quantity, $unitPrice, $saleId, $originalUnitPrice, $discountAmount, $createdBy, $allowNegativeStock) {
             $baseQuantity = $this->conversion->toBaseQuantity($productUnit, $quantity);
 
             $saleItem = SaleItem::create([
@@ -57,6 +58,7 @@ class SaleItemService
                 referenceType: SaleItem::class,
                 referenceId: $saleItem->id,
                 createdBy: $createdBy,
+                allowNegativeStock: $allowNegativeStock,
             );
 
             return $saleItem;

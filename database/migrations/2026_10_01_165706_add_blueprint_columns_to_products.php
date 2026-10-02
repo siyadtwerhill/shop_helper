@@ -1,0 +1,33 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('products', function (Blueprint $table) {
+            $table->unsignedBigInteger('blueprint_id')->nullable()->after('status');
+            $table->foreign('blueprint_id')->references('id')->on('blueprints')->onDelete('set null');
+            $table->integer('blueprint_version')->default(1)->after('blueprint_id');
+            $table->enum('stock_mode', ['own', 'from_variants', 'from_components'])->default('own')->after('blueprint_version');
+            $table->json('attributes')->nullable()->after('stock_mode');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::table('products', function (Blueprint $table) {
+            $table->dropForeign(['blueprint_id']);
+            $table->dropColumn(['blueprint_id', 'blueprint_version', 'stock_mode', 'attributes']);
+        });
+    }
+};

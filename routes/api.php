@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\BlueprintController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\Api\ProductUnitController;
@@ -124,6 +125,16 @@ Route::middleware('auth:sanctum')->group(function () {
     // (PHP does not populate files/input on a real PUT).
     Route::match(['put', 'patch', 'post'], '/products/{product}', [ProductController::class, 'update']);
     Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+
+    // ---- Blueprints ----
+    Route::get('/blueprints', [BlueprintController::class, 'index']);
+    Route::post('/blueprints', [BlueprintController::class, 'store']);
+    Route::get('/blueprints/presets', [BlueprintController::class, 'presets']);
+    Route::get('/blueprints/{blueprint}', [BlueprintController::class, 'show']);
+    Route::get('/blueprints/{blueprint}/schema', [BlueprintController::class, 'schema']);
+    Route::put('/blueprints/{blueprint}', [BlueprintController::class, 'update']);
+    Route::delete('/blueprints/{blueprint}', [BlueprintController::class, 'destroy']);
+    Route::post('/blueprints/{blueprint}/duplicate', [BlueprintController::class, 'duplicate']);
 
     Route::apiResource('categories', CategoryController::class);
     Route::apiResource('brands', BrandController::class);

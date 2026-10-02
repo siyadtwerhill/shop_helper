@@ -46,8 +46,10 @@ class EmployeeController extends Controller
         $query = Staff::with(['user.roles', 'branch'])
             ->where('shop_owner_id', $shop->id);
 
-        // Apply branch scope automatically via BelongsToBranch trait
-        // Branch heads will only see their own branch's staff
+        // Apply branch scope for branch heads
+        if (auth()->user()->isBranchHead() && auth()->user()->staff?->branch_id) {
+            $query->where('branch_id', auth()->user()->staff->branch_id);
+        }
 
         if ($request->filled('role')) {
             $query->whereHas('user.roles', fn ($q) => $q->where('name', $request->role));
@@ -62,17 +64,14 @@ class EmployeeController extends Controller
                 ->orWhere('email', 'like', '%' . addcslashes($term, '%_') . '%'));
         }
 
-        $employees = $query->latest()->get();
-
-        // Count should respect branch scope too
-        $totalCountQuery = Staff::where('shop_owner_id', $shop->id);
-        if (auth()->user()->isBranchHead() && auth()->user()->staff?->branch_id) {
-            $totalCountQuery->where('branch_id', auth()->user()->staff->branch_id);
-        }
+        $employees = $query->latest()->paginate(20);
 
         return response()->json([
-            'employees' => $employees,
-            'total_count' => $totalCountQuery->count(),
+            'employees' => [
+                'data' => $employees->items(),
+                'current_page' => $employees->currentPage(),
+                'total' => $employees->total(),
+            ],
         ]);
     }
 

@@ -29,7 +29,7 @@ class ProductBundleController extends Controller
             'items' => 'required|array|min:1',
             'items.*.component_product_id' => 'required|exists:products,id|different:product', // guard against self-reference below too
             'items.*.unit_id' => 'required|exists:product_units,id',
-            'items.*.quantity' => 'required|numeric|min:0.0001',
+            'items.*.quantity' => 'required|numeric|min:1',
         ]);
 
         foreach ($data['items'] as $item) {

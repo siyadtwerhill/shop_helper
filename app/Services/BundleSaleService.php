@@ -22,6 +22,7 @@ class BundleSaleService
         ?int $createdBy = null,
         ?string $referenceType = null,
         ?int $referenceId = null,
+        bool $allowNegativeStock = false,
     ): array {
         $movements = [];
 
@@ -36,6 +37,7 @@ class BundleSaleService
                 referenceType: $referenceType ?? ProductBundle::class,
                 referenceId: $referenceId ?? $bundle->id,
                 createdBy: $createdBy,
+                allowNegativeStock: $allowNegativeStock,
             );
         }
 
