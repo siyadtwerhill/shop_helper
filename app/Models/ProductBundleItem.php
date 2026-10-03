@@ -9,7 +9,13 @@ class ProductBundleItem extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['product_bundle_id', 'component_product_id', 'unit_id', 'quantity'];
+    protected $fillable = [
+        'product_bundle_id',
+        'component_product_id',
+        'component_variant_id',
+        'unit_id',
+        'quantity',
+    ];
 
     protected $casts = ['quantity' => 'decimal:4'];
 
@@ -26,5 +32,10 @@ class ProductBundleItem extends Model
     public function unit()
     {
         return $this->belongsTo(ProductUnit::class, 'unit_id');
+    }
+
+    public function variant()
+    {
+        return $this->belongsTo(ProductVariant::class, 'component_variant_id')->withTrashed();
     }
 }

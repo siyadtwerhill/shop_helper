@@ -25,20 +25,21 @@ class BlueprintPresetService
                 'bundles' => false,
                 'batch_expiry' => false,
                 'serial_numbers' => false,
-                'decimal_quantities' => false,
+                'decimal_quantities' => true,
                 'multiple_units' => true,
             ],
             'pricing_policy' => [
-                'allowed_modes' => ['fixed', 'negotiable', 'wholesale'],
+                'allowed_modes' => ['fixed', 'negotiable', 'price_range', 'wholesale'],
                 'default_mode' => 'fixed',
-                'min_margin_percent' => 15,
-                'cost_required' => true,
+                'min_margin_percent' => null,
+                'cost_required' => false,
                 'block_below_margin' => false,
                 'price_per_variant' => false,
+                'pos_price_override' => 'anyone',
             ],
             'unit_policy' => [
-                'default_base_unit' => 'piece',
-                'allowed_units' => ['piece', 'box', 'dozen'],
+                'default_base_unit_id' => null,
+                'allowed_unit_ids' => [],
                 'price_per_unit' => true,
                 'barcode_per_unit' => false,
                 'buy_sell_different_units' => true,
@@ -76,16 +77,17 @@ class BlueprintPresetService
                 'multiple_units' => true,
             ],
             'pricing_policy' => [
-                'allowed_modes' => ['fixed', 'negotiable', 'wholesale'],
+                'allowed_modes' => ['fixed', 'negotiable', 'price_range', 'wholesale'],
                 'default_mode' => 'fixed',
                 'min_margin_percent' => 15,
                 'cost_required' => true,
                 'block_below_margin' => false,
                 'price_per_variant' => true,
+                'pos_price_override' => false,
             ],
             'unit_policy' => [
-                'default_base_unit' => 'piece',
-                'allowed_units' => ['piece', 'box', 'dozen'],
+                'default_base_unit_id' => null,
+                'allowed_unit_ids' => [],
                 'price_per_unit' => true,
                 'barcode_per_unit' => false,
                 'buy_sell_different_units' => true,
@@ -200,6 +202,37 @@ class BlueprintPresetService
         ]);
 
         return $blueprint;
+    }
+
+    /**
+     * Ensure a blueprint that has variants=true has at least Color and Size axes.
+     * Safe to call repeatedly — firstOrCreate is idempotent.
+     */
+    public function ensureVariantAxes(Blueprint $bp): void
+    {
+        $order = BlueprintField::where('blueprint_id', $bp->id)->where('is_variant_axis', true)->count();
+
+        foreach (['color' => 'Color', 'size' => 'Size'] as $key => $label) {
+            $def = FieldDefinition::firstOrCreate(
+                ['shop_owner_id' => $bp->shop_owner_id, 'key' => $key],
+                ['label' => $label, 'type' => 'text', 'options' => null, 'validation' => null]
+            );
+            BlueprintField::firstOrCreate(
+                ['blueprint_id' => $bp->id, 'field_definition_id' => $def->id],
+                [
+                    'section'        => 'variant_axes',
+                    'sort_order'     => ++$order,
+                    'required'       => false,
+                    'is_variant_axis'=> true,
+                    'show_in_list'   => false,
+                    'show_in_pos'    => true,
+                    'show_on_label'  => true,
+                    'is_filterable'  => false,
+                    'is_searchable'  => false,
+                    'hidden'         => false,
+                ]
+            );
+        }
     }
 
     /**

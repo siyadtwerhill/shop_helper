@@ -16,6 +16,7 @@ return new class extends Migration
             $table->unsignedBigInteger('shop_owner_id');
             $table->foreign('shop_owner_id')->references('id')->on('shop_owners')->onDelete('cascade');
             $table->string('name');
+            $table->text('description')->nullable();
             $table->string('preset_key')->nullable();
             $table->boolean('is_default')->default(false);
             $table->enum('status', ['draft', 'active', 'archived'])->default('draft');

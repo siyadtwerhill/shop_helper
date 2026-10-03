@@ -21,12 +21,15 @@ class Blueprint extends Model
     protected $fillable = [
         'shop_owner_id',
         'name',
+        'description',
         'preset_key',
         'is_default',
         'status',
         'capabilities',
         'pricing_policy',
         'unit_policy',
+        'default_base_unit_id',
+        'allowed_unit_ids',
         'layout',
         'version',
     ];
@@ -36,6 +39,7 @@ class Blueprint extends Model
         'capabilities' => 'array',
         'pricing_policy' => 'array',
         'unit_policy' => 'array',
+        'allowed_unit_ids' => 'array',
         'layout' => 'array',
     ];
 

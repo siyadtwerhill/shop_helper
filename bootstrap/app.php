@@ -29,6 +29,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(function (\App\Exceptions\InsufficientStockException $e, $request) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        });
     })
     ->create();

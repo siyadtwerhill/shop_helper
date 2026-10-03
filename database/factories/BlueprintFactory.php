@@ -35,8 +35,8 @@ class BlueprintFactory extends Factory
                 'price_per_variant' => fake()->boolean(),
             ],
             'unit_policy' => [
-                'default_base_unit' => 'piece',
-                'allowed_units' => ['piece', 'box', 'dozen'],
+                'default_base_unit_id' => null, // Will be set in afterMaking callback
+                'allowed_unit_ids' => [],
                 'price_per_unit' => true,
                 'barcode_per_unit' => false,
                 'buy_sell_different_units' => true,

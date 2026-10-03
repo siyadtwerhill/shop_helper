@@ -2,31 +2,36 @@
 
 namespace App\Services;
 
-use App\Models\Product;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class SkuGenerator
 {
-    /**
-     * Format: {CATEGORY_PREFIX}-{5-digit sequential number}
-     * e.g. "BEV-00001". Falls back to "GEN" if no category.
-     */
+    /** Format {PREFIX}-{5 digits}, numbered per shop and prefix under a row lock. */
     public function generate(int $shopOwnerId, ?string $categoryName = null): string
     {
-        $prefix = $categoryName
-            ? Str::upper(Str::limit(preg_replace('/[^A-Za-z]/', '', $categoryName), 3, ''))
-            : 'GEN';
+        $prefix = $this->prefixFor($categoryName);
 
-        $prefix = $prefix ?: 'GEN';
+        return DB::transaction(function () use ($shopOwnerId, $prefix) {
+            DB::table('sku_counters')->insertOrIgnore([
+                'shop_owner_id' => $shopOwnerId, 'prefix' => $prefix, 'last_number' => 0,
+            ]);
 
-        do {
-            $count = Product::where('shop_owner_id', $shopOwnerId)
-                ->where('sku', 'like', "{$prefix}-%")
-                ->count();
+            $row = DB::table('sku_counters')
+                ->where('shop_owner_id', $shopOwnerId)->where('prefix', $prefix)
+                ->lockForUpdate()->first();
 
-            $candidate = sprintf('%s-%05d', $prefix, $count + 1);
-        } while (Product::where('sku', $candidate)->exists()); // guards a rare race
+            $next = $row->last_number + 1;
+            DB::table('sku_counters')->where('id', $row->id)->update(['last_number' => $next]);
 
-        return $candidate;
+            return sprintf('%s-%05d', $prefix, $next);
+        });
+    }
+
+    private function prefixFor(?string $name): string
+    {
+        $letters = preg_replace('/[^A-Za-z]/', '', Str::ascii((string) $name));
+
+        return $letters !== '' ? Str::upper(substr($letters, 0, 3)) : 'GEN';
     }
 }

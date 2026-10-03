@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Product;
 use App\Models\ProductUnit;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -74,23 +75,41 @@ class UnitConversionService
     }
 
     /**
-     * Enforce "one base unit per product": clears is_base on every other unit,
-     * sets it (and conversion_factor = 1) on the given one, and syncs the
+     * Enforce "one base unit per product": rescales every other unit relative to the
+     * new base, then sets conversion_factor = 1 on the chosen unit, and syncs the
      * products.base_unit_id cache column used for fast joins.
+     *
+     * Only allowed before any inventory movements exist — four-decimal rounding (1/12 →
+     * 0.0833) means the ledger would be wrong if we rescaled after stock had moved.
      */
     public function setBaseUnit(Product $product, ProductUnit $productUnit): void
     {
         if ($productUnit->product_id !== $product->id) {
             throw new InvalidArgumentException('That unit does not belong to this product.');
         }
+        if ($productUnit->is_base) {
+            return;
+        }
+        if ($product->inventoryMovements()->exists()) {
+            throw ValidationException::withMessages([
+                'unit_id' => ["The base unit can't change after stock has moved. Add the new unit as an extra unit instead."],
+            ]);
+        }
 
-        $product->units()->where('id', '!=', $productUnit->id)->update(['is_base' => false]);
+        $f = $this->normalize($productUnit->conversion_factor);
+        if (bccomp($f, '0', self::SCALE) <= 0) {
+            throw new InvalidArgumentException('The new base unit has an invalid conversion factor.');
+        }
 
-        $productUnit->forceFill([
-            'is_base' => true,
-            'conversion_factor' => '1.0000',
-        ])->save();
+        // every other unit is now expressed relative to the new base
+        foreach ($product->units()->where('id', '!=', $productUnit->id)->get() as $u) {
+            $u->forceFill([
+                'conversion_factor' => bcdiv($this->normalize($u->conversion_factor), $f, self::SCALE),
+                'is_base' => false,
+            ])->save();
+        }
 
+        $productUnit->forceFill(['is_base' => true, 'conversion_factor' => '1.0000'])->save();
         $product->forceFill(['base_unit_id' => $productUnit->id])->save();
     }
 

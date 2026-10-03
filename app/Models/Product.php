@@ -25,19 +25,27 @@ class Product extends Model
     protected $fillable = [
         'shop_owner_id', 'branch_id', 'category_id', 'brand_id',
         'name', 'description', 'internal_notes', 'image_path',
-        'sku', 'qr_path', 'status', 'product_type', 'current_stock', 'base_unit_id',
-        'pricing_mode', 'cost_price', 'min_margin_percent', 'min_price',
-        'blueprint_id', 'blueprint_version', 'stock_mode', 'attributes',
+        'sku', 'qr_path', 'status', 'product_type', 'base_unit_id',
+        'pricing_mode', 'cost_price', 'min_margin_percent', 'min_price', 'min_stock',
+        'blueprint_id', 'blueprint_version', 'stock_mode', 'custom_fields',
+        'reorder_quantity', 'track_stock', 'allow_negative_stock', 'is_sellable',
+        'created_by', 'updated_by',
     ];
 
     protected $casts = [
         'cost_price' => 'decimal:2',
         'min_margin_percent' => 'decimal:2',
         'min_price' => 'decimal:2',
-        'attributes' => 'array',
+        'min_stock' => 'decimal:4',
+        'current_stock' => 'decimal:4',
+        'reorder_quantity' => 'decimal:4',
+        'track_stock' => 'boolean',
+        'allow_negative_stock' => 'boolean',
+        'is_sellable' => 'boolean',
+        'custom_fields' => 'array',
     ];
 
-    protected $appends = ['qr_url', 'current_stock', 'is_bundle', 'available_stock'];
+    protected $appends = ['qr_url', 'image_url'];
 
     protected static function booted(): void
     {
@@ -63,7 +71,7 @@ class Product extends Model
 
     public function primaryBarcode(): ?ProductBarcode
     {
-        return $this->barcodes()->where('is_primary', true)->first();
+        return $this->barcodes()->where('is_primary', true)->whereNull('product_variant_id')->first();
     }
 
     public function getQrUrlAttribute(): ?string
@@ -71,52 +79,8 @@ class Product extends Model
         return $this->qr_path ? asset('storage/' . $this->qr_path) : null;
     }
 
-    public function getCurrentStockAttribute(): string
+    public function getImageUrlAttribute(): ?string
     {
-        // Sum all inventory movements to get current stock
-        $sum = $this->inventoryMovements()
-            ->selectRaw('COALESCE(SUM(base_quantity), 0) as total')
-            ->value('total');
-        
-        return (string) $sum;
+        return $this->image_path ? asset('storage/' . $this->image_path) : null;
     }
-
-    public function getIsBundleAttribute(): bool
-    {
-        return $this->bundle()->exists();
-    }
-
-    public function getAvailableStockAttribute(): string
-    {
-        // For bundles, calculate available stock based on component products
-        if ($this->product_type === 'bundle' && $this->bundle) {
-            $bundle = $this->bundle;
-            $minStock = null;
-            
-            foreach ($bundle->items as $item) {
-                $componentStock = (float) $item->component->current_stock;
-                $requiredQty = (float) $item->quantity;
-                $possibleBundles = $componentStock / $requiredQty;
-                
-                if ($minStock === null || $possibleBundles < $minStock) {
-                    $minStock = $possibleBundles;
-                }
-            }
-            
-            return (string) floor($minStock ?? 0);
-        }
-        
-        // For variant products, sum up all variant stocks (they have their own current_stock attribute)
-        if ($this->product_type === 'variant' && $this->variants()->exists()) {
-            $totalStock = 0;
-            foreach ($this->variants as $variant) {
-                $totalStock += (float) ($variant->current_stock ?? 0);
-            }
-            return (string) $totalStock;
-        }
-        
-        // For neutral products, return current stock
-        return $this->current_stock;
-    }
-
 }

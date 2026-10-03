@@ -166,8 +166,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ---- Variants ----
     Route::get('products/{product}/variants', [ProductVariantController::class, 'index']);
+    Route::get('products/{product}/variant-axes', [ProductVariantController::class, 'axes']);
     Route::post('products/{product}/variants', [ProductVariantController::class, 'store']);
+    Route::post('products/{product}/variants/bulk', [ProductVariantController::class, 'bulk']);
     Route::put('products/{product}/variants/{variant}', [ProductVariantController::class, 'update']);
+    Route::post('products/{product}/variants/{variant}/assign-stock', [ProductVariantController::class, 'assignStock']);
     Route::delete('products/{product}/variants/{variant}', [ProductVariantController::class, 'destroy']);
 
     // ---- Bundles ----

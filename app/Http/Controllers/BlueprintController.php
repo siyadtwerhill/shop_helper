@@ -6,19 +6,24 @@ use App\Models\Blueprint;
 use App\Models\FieldDefinition;
 use App\Models\BlueprintField;
 use App\Services\BlueprintPresetService;
+use App\Services\BlueprintSchemaResolver;
 use App\Traits\ResolvesShop;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class BlueprintController extends Controller
 {
     use ResolvesShop;
 
     private BlueprintPresetService $presetService;
+    private BlueprintSchemaResolver $schemaResolver;
 
-    public function __construct(BlueprintPresetService $presetService)
+    public function __construct(BlueprintPresetService $presetService, BlueprintSchemaResolver $schemaResolver)
     {
         $this->presetService = $presetService;
+        $this->schemaResolver = $schemaResolver;
     }
 
     /**
@@ -60,55 +65,115 @@ class BlueprintController extends Controller
     {
         $shop = $this->shop($request);
 
+        // Owner-only check
+        abort_unless($request->user()->role === 'shop_owner', 403, 'Only shop owners can create blueprints');
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
-            'preset_key' => 'nullable|string|in:fashion,grocery,pharmacy,electronics,cafe,blank',
+            'description' => 'nullable|string',
+            'preset_key' => 'nullable|string|in:generic,fashion,grocery,pharmacy,electronics,cafe,blank',
             'capabilities' => 'nullable|array',
             'pricing_policy' => 'nullable|array',
             'unit_policy' => 'nullable|array',
-            'fields' => 'nullable|array',
+            'layout' => 'nullable|array',
+            'fields' => 'nullable|array|max:60',
+            'fields.*.key' => ['required', 'alpha_dash', 'max:60', 'distinct'],
+            'fields.*.label' => 'required|string|max:100',
+            'fields.*.type' => ['required', Rule::in(['text', 'textarea', 'number', 'decimal', 'select', 'multi_select', 'checkbox', 'date', 'boolean', 'json'])],
+            'fields.*.options' => 'nullable|array|max:100',
+            'fields.*.validation' => 'nullable|array',
+            'fields.*.section' => 'nullable|string|max:50',
+            'fields.*.sort_order' => 'nullable|integer|min:0',
+            'fields.*.required' => 'nullable|boolean',
+            'fields.*.show_in_list' => 'nullable|boolean',
+            'fields.*.show_in_pos' => 'nullable|boolean',
+            'fields.*.show_on_label' => 'nullable|boolean',
+            'fields.*.is_variant_axis' => 'nullable|boolean',
+            'fields.*.is_filterable' => 'nullable|boolean',
+            'fields.*.is_searchable' => 'nullable|boolean',
+            'fields.*.hidden' => 'nullable|boolean',
         ]);
 
-        $blueprint = Blueprint::create([
-            'shop_owner_id' => $shop->id,
-            'name' => $data['name'],
-            'preset_key' => $data['preset_key'] ?? null,
-            'is_default' => false,
-            'status' => 'active',
-            'capabilities' => $data['capabilities'] ?? [],
-            'pricing_policy' => $data['pricing_policy'] ?? [],
-            'unit_policy' => $data['unit_policy'] ?? [],
-            'version' => 1,
-        ]);
+        // Validate pricing policy
+        if (!empty($data['pricing_policy'])) {
+            $allowedModes = $data['pricing_policy']['allowed_modes'] ?? [];
+            $defaultMode = $data['pricing_policy']['default_mode'] ?? null;
+            $minMargin = $data['pricing_policy']['min_margin_percent'] ?? null;
 
-        // Create fields if provided
-        if (!empty($data['fields'])) {
-            foreach ($data['fields'] as $fieldData) {
-                $fieldDef = FieldDefinition::create([
-                    'shop_owner_id' => $shop->id,
-                    'key' => $fieldData['key'],
-                    'label' => $fieldData['label'],
-                    'type' => $fieldData['type'],
-                    'options' => $fieldData['options'] ?? null,
-                    'validation' => $fieldData['validation'] ?? null,
-                ]);
+            if (!empty($allowedModes)) {
+                $validModes = ['fixed', 'negotiable', 'price_range', 'wholesale'];
+                foreach ($allowedModes as $mode) {
+                    if (!in_array($mode, $validModes)) {
+                        return response()->json([
+                            'message' => "Invalid pricing mode: {$mode}",
+                        ], 422);
+                    }
+                }
+            }
 
-                BlueprintField::create([
-                    'blueprint_id' => $blueprint->id,
-                    'field_definition_id' => $fieldDef->id,
-                    'section' => $fieldData['section'] ?? 'details',
-                    'sort_order' => $fieldData['sort_order'] ?? 0,
-                    'required' => $fieldData['required'] ?? false,
-                    'show_in_list' => $fieldData['show_in_list'] ?? false,
-                    'show_in_pos' => $fieldData['show_in_pos'] ?? false,
-                    'show_on_label' => $fieldData['show_on_label'] ?? false,
-                    'is_variant_axis' => $fieldData['is_variant_axis'] ?? false,
-                    'is_filterable' => $fieldData['is_filterable'] ?? false,
-                    'is_searchable' => $fieldData['is_searchable'] ?? false,
-                    'hidden' => $fieldData['hidden'] ?? false,
-                ]);
+            if ($defaultMode && !empty($allowedModes) && !in_array($defaultMode, $allowedModes)) {
+                return response()->json([
+                    'message' => 'Default pricing mode must be in allowed modes',
+                ], 422);
+            }
+
+            if ($minMargin !== null && ($minMargin < 0 || $minMargin > 100)) {
+                return response()->json([
+                    'message' => 'Minimum margin percent must be between 0 and 100',
+                ], 422);
             }
         }
+
+        $blueprint = DB::transaction(function () use ($data, $shop) {
+            $blueprint = Blueprint::create([
+                'shop_owner_id' => $shop->id,
+                'name' => $data['name'],
+                'description' => $data['description'] ?? null,
+                'preset_key' => $data['preset_key'] ?? null,
+                'is_default' => false,
+                'status' => 'active',
+                'capabilities' => $data['capabilities'] ?? [],
+                'pricing_policy' => $data['pricing_policy'] ?? [],
+                'unit_policy' => $data['unit_policy'] ?? [],
+                'layout' => $data['layout'] ?? [],
+                'version' => 1,
+            ]);
+
+            // Create fields if provided - reuse field definitions by key
+            if (!empty($data['fields'])) {
+                foreach ($data['fields'] as $fieldData) {
+                    $fieldDef = FieldDefinition::firstOrCreate(
+                        [
+                            'shop_owner_id' => $shop->id,
+                            'key' => $fieldData['key'],
+                        ],
+                        [
+                            'label' => $fieldData['label'],
+                            'type' => $fieldData['type'],
+                            'options' => $fieldData['options'] ?? null,
+                            'validation' => $fieldData['validation'] ?? null,
+                        ]
+                    );
+
+                    BlueprintField::create([
+                        'blueprint_id' => $blueprint->id,
+                        'field_definition_id' => $fieldDef->id,
+                        'section' => $fieldData['section'] ?? 'details',
+                        'sort_order' => $fieldData['sort_order'] ?? 0,
+                        'required' => $fieldData['required'] ?? false,
+                        'show_in_list' => $fieldData['show_in_list'] ?? false,
+                        'show_in_pos' => $fieldData['show_in_pos'] ?? false,
+                        'show_on_label' => $fieldData['show_on_label'] ?? false,
+                        'is_variant_axis' => $fieldData['is_variant_axis'] ?? false,
+                        'is_filterable' => $fieldData['is_filterable'] ?? false,
+                        'is_searchable' => $fieldData['is_searchable'] ?? false,
+                        'hidden' => $fieldData['hidden'] ?? false,
+                    ]);
+                }
+            }
+
+            return $blueprint;
+        });
 
         return response()->json([
             'message' => 'Blueprint created.',
@@ -122,20 +187,60 @@ class BlueprintController extends Controller
     public function update(Request $request, Blueprint $blueprint): JsonResponse
     {
         $this->ownedBlueprint($request, $blueprint);
+        $shop = $this->shop($request);
+
+        // Owner-only check
+        abort_unless($request->user()->role === 'shop_owner', 403, 'Only shop owners can update blueprints');
 
         $data = $request->validate([
             'name' => 'sometimes|string|max:255',
+            'description' => 'sometimes|nullable|string',
             'status' => 'sometimes|in:draft,active,archived',
             'capabilities' => 'sometimes|array',
             'pricing_policy' => 'sometimes|array',
             'unit_policy' => 'sometimes|array',
+            'make_default' => 'sometimes|boolean',
         ]);
+
+        // Prevent archiving the default blueprint
+        if (isset($data['status']) && $data['status'] === 'archived' && $blueprint->is_default) {
+            return response()->json([
+                'message' => 'Cannot archive the default blueprint.',
+            ], 403);
+        }
+
+        // Make default - unsets previous default in transaction
+        if (!empty($data['make_default']) && $data['make_default']) {
+            DB::transaction(function () use ($shop, $blueprint) {
+                Blueprint::where('shop_owner_id', $shop->id)
+                    ->where('is_default', true)
+                    ->update(['is_default' => false]);
+                $blueprint->update(['is_default' => true]);
+            });
+            unset($data['make_default']);
+        }
+
+        // Bump version if capabilities, policies, or layout change
+        $shouldBumpVersion = false;
+        if (isset($data['capabilities']) && $data['capabilities'] !== $blueprint->capabilities) {
+            $shouldBumpVersion = true;
+        }
+        if (isset($data['pricing_policy']) && $data['pricing_policy'] !== $blueprint->pricing_policy) {
+            $shouldBumpVersion = true;
+        }
+        if (isset($data['unit_policy']) && $data['unit_policy'] !== $blueprint->unit_policy) {
+            $shouldBumpVersion = true;
+        }
 
         $blueprint->update($data);
 
+        if ($shouldBumpVersion) {
+            $blueprint->increment('version');
+        }
+
         return response()->json([
             'message' => 'Blueprint updated.',
-            'blueprint' => $blueprint,
+            'blueprint' => $blueprint->fresh(),
         ]);
     }
 
@@ -146,10 +251,20 @@ class BlueprintController extends Controller
     {
         $this->ownedBlueprint($request, $blueprint);
 
+        // Owner-only check
+        abort_unless($request->user()->role === 'shop_owner', 403, 'Only shop owners can delete blueprints');
+
         if ($blueprint->is_default) {
             return response()->json([
                 'message' => 'Cannot delete the default blueprint.',
             ], 403);
+        }
+
+        // Check if products are using this blueprint (including soft-deleted)
+        if ($blueprint->products()->withTrashed()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete blueprint: it is being used by products. Archive it instead.',
+            ], 409);
         }
 
         $blueprint->delete();
@@ -166,21 +281,29 @@ class BlueprintController extends Controller
     {
         $this->ownedBlueprint($request, $blueprint);
 
-        $newBlueprint = $blueprint->replicate([
-            'is_default',
-            'version',
-        ]);
-        $newBlueprint->name = $blueprint->name . ' (copy)';
-        $newBlueprint->is_default = false;
-        $newBlueprint->version = 1;
-        $newBlueprint->save();
+        // Owner-only check
+        abort_unless($request->user()->role === 'shop_owner', 403, 'Only shop owners can duplicate blueprints');
 
-        // Duplicate fields
-        foreach ($blueprint->fields as $field) {
-            $newField = $field->replicate();
-            $newField->blueprint_id = $newBlueprint->id;
-            $newField->save();
-        }
+        $newBlueprint = DB::transaction(function () use ($blueprint) {
+            $newBlueprint = $blueprint->replicate([
+                'is_default',
+                'version',
+            ]);
+            $newBlueprint->name = $blueprint->name . ' (copy)';
+            $newBlueprint->is_default = false;
+            $newBlueprint->status = 'active'; // Always create active copy
+            $newBlueprint->version = 1;
+            $newBlueprint->save();
+
+            // Duplicate fields (share field definitions)
+            foreach ($blueprint->fields as $field) {
+                $newField = $field->replicate();
+                $newField->blueprint_id = $newBlueprint->id;
+                $newField->save();
+            }
+
+            return $newBlueprint;
+        });
 
         return response()->json([
             'message' => 'Blueprint duplicated.',
@@ -195,35 +318,11 @@ class BlueprintController extends Controller
     {
         $this->ownedBlueprint($request, $blueprint);
 
-        $blueprint->load('fields.fieldDefinition');
+        $schema = $this->schemaResolver->resolve($blueprint);
 
         return response()->json([
             'blueprint' => $blueprint,
-            'schema' => [
-                'capabilities' => $blueprint->capabilities,
-                'pricing_policy' => $blueprint->pricing_policy,
-                'unit_policy' => $blueprint->unit_policy,
-                'layout' => $blueprint->layout,
-                'fields' => $blueprint->fields->map(function ($field) {
-                    return [
-                        'key' => $field->fieldDefinition->key,
-                        'label' => $field->fieldDefinition->label,
-                        'type' => $field->fieldDefinition->type,
-                        'options' => $field->fieldDefinition->options,
-                        'validation' => $field->fieldDefinition->validation,
-                        'section' => $field->section,
-                        'sort_order' => $field->sort_order,
-                        'required' => $field->required,
-                        'show_in_list' => $field->show_in_list,
-                        'show_in_pos' => $field->show_in_pos,
-                        'show_on_label' => $field->show_on_label,
-                        'is_variant_axis' => $field->is_variant_axis,
-                        'is_filterable' => $field->is_filterable,
-                        'is_searchable' => $field->is_searchable,
-                        'hidden' => $field->hidden,
-                    ];
-                }),
-            ],
+            'schema' => $schema,
         ]);
     }
 
