@@ -4,10 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ProductBarcode;
+use App\Traits\ResolvesShop;
 use Illuminate\Http\Request;
 
 class ProductScannerController extends Controller
 {
+    use ResolvesShop;
+
     /**
      * Camera scan flow (spec §4): open camera -> scan -> find product.
      * Found -> return the product. Not found -> 404 with the scanned code echoed back
@@ -17,7 +20,11 @@ class ProductScannerController extends Controller
     {
         $data = $request->validate(['code' => 'required|string']);
 
-        $barcode = ProductBarcode::where('barcode', $data['code'])->with('product')->first();
+        $shop = $this->shop($request);
+        $barcode = ProductBarcode::where('shop_owner_id', $shop->id)
+            ->where('barcode', $data['code'])
+            ->with('product')
+            ->first();
 
         if (! $barcode) {
             return response()->json([

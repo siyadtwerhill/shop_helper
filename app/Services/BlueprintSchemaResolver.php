@@ -8,6 +8,83 @@ use Illuminate\Support\Collection;
 
 class BlueprintSchemaResolver
 {
+    /** What the product form needs: custom-field sections (no variant axes, no hidden fields) and the axes separately. */
+    public function formFor(Blueprint $blueprint): array
+    {
+        $blueprint->load('fields.fieldDefinition');
+
+        $fields = $blueprint->fields
+            ->filter(fn (BlueprintField $f) => ! $f->hidden && $f->fieldDefinition)
+            ->sortBy('sort_order')
+            ->values();
+
+        $layout = $blueprint->layout['sections'] ?? [];
+        $labels = [
+            'details'    => 'Details',
+            'pricing'    => 'Pricing',
+            'inventory'  => 'Inventory',
+            'attributes' => 'Attributes',
+            'custom'     => 'Custom Fields',
+        ];
+
+        $sections = $fields
+            ->reject(fn ($f) => $f->is_variant_axis)
+            ->groupBy('section')
+            ->map(fn ($group, $key) => [
+                'key'    => $key,
+                'label'  => $layout[$key]['label'] ?? $labels[$key] ?? ucwords(str_replace('_', ' ', $key)),
+                'sort'   => $layout[$key]['sort_order'] ?? 99,
+                'fields' => $group->map(fn ($f) => [
+                    'key'      => $f->fieldDefinition->key,
+                    'label'    => $f->fieldDefinition->label,
+                    'type'     => (string) $f->fieldDefinition->type,
+                    'options'  => $this->normalizeOptions($f->fieldDefinition->options ?? []),
+                    'required' => (bool) $f->required,
+                ])->values()->all(),
+            ])
+            ->sortBy('sort')
+            ->values()
+            ->map(fn ($s) => collect($s)->except('sort')->all())
+            ->all();
+
+        $axes = $fields
+            ->filter(fn ($f) => $f->is_variant_axis)
+            ->map(fn ($f) => [
+                'key'      => $f->fieldDefinition->key,
+                'label'    => $f->fieldDefinition->label,
+                'required' => (bool) $f->required,
+                'options'  => array_column($this->normalizeOptions($f->fieldDefinition->options ?? []), 'label'),
+                'strict'   => (bool) (($f->fieldDefinition->validation ?? [])['strict'] ?? false),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'blueprint'      => $blueprint->only(['id', 'name', 'version', 'is_default', 'status']),
+            'capabilities'   => $blueprint->capabilities ?? [],
+            'pricing_policy' => $blueprint->pricing_policy ?? [],
+            'unit_policy'    => $blueprint->unit_policy ?? [],
+            'sections'       => $sections,
+            'axes'           => $axes,
+        ];
+    }
+
+    /**
+     * Plain strings and {value,label,active} objects both become {value,label}.
+     * Inactive options are dropped.
+     */
+    private function normalizeOptions(array $options): array
+    {
+        return collect($options)->map(function ($o) {
+            if (! is_array($o)) {
+                return ['value' => (string) $o, 'label' => (string) $o];
+            }
+            if (! ($o['active'] ?? true)) return null;
+            $v = (string) ($o['value'] ?? $o['label'] ?? '');
+            return $v === '' ? null : ['value' => $v, 'label' => (string) ($o['label'] ?? $v)];
+        })->filter()->values()->all();
+    }
+
     /**
      * Resolve the complete schema for a blueprint
      */

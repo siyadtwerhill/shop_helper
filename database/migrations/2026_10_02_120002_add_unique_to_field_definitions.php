@@ -14,10 +14,10 @@ return new class extends Migration
     {
         Schema::table('field_definitions', function (Blueprint $table) {
             // Drop the old unique on 'key' if it exists
-            $schemaManager = DB::getDoctrineSchemaManager();
-            $tableInfo = $schemaManager->listTableDetails('field_definitions');
+            $indexes = Schema::getIndexes('field_definitions');
+            $hasOldIndex = collect($indexes)->contains(fn ($index) => $index['name'] === 'field_definitions_key_unique');
 
-            if ($tableInfo->hasIndex('field_definitions_key_unique')) {
+            if ($hasOldIndex) {
                 $table->dropUnique(['key']);
             }
 

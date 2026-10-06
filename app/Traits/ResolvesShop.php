@@ -4,6 +4,7 @@ namespace App\Traits;
 
 use Illuminate\Http\Request;
 use App\Models\Product;
+use App\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
 trait ResolvesShop
@@ -38,6 +39,21 @@ trait ResolvesShop
         $user->unsetRelation('roles')->unsetRelation('permissions');
 
         abort_unless($user->can($permission), 403, 'You do not have permission to do this.');
+    }
+
+    protected function assertCanGrant(Request $request, Role $role): void
+    {
+        $user = $request->user();
+        if ($user->isShopOwner() || $user->isSuperAdmin()) {
+            return;
+        }
+
+        $mine = $user->getAllPermissions()->pluck('id');
+        abort_if(
+            $role->permissions()->pluck('id')->diff($mine)->isNotEmpty(),
+            403,
+            "You can't assign a role with more access than your own."
+        );
     }
 
     /** 404 (not 403) so ids of other shops or branches are never confirmed to exist. */

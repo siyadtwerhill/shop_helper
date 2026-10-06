@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\ShopOwner;
 use App\Models\Staff;
 use App\Models\User;
+use App\Services\BlueprintPresetService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -47,6 +49,13 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
+        if ($user->role === 'staff') {
+            $staff = $user->staff;
+            if (! $staff || $staff->status !== 'active') {
+                return response()->json(['message' => 'Your account is deactivated. Please contact your shop owner.'], 403);
+            }
+        }
+
         $token = $user->createToken('auth-token')->plainTextToken;
 
         // Build user data with permissions
@@ -78,7 +87,7 @@ class AuthController extends Controller
         return response()->json($payload);
     }
 
-    public function shopOwnerRegister(Request $request)
+    public function shopOwnerRegister(Request $request, BlueprintPresetService $presets)
     {
         $validator = Validator::make($request->all(), [
             'owner_name' => 'required|string|max:255',
@@ -91,36 +100,38 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Generate a unique username from the owner's name
-        $baseUsername = Str::slug($request->owner_name, '_');
-        $username = $baseUsername;
-        $suffix = 1;
-        while (User::where('username', $username)->exists()) {
-            $username = $baseUsername . '_' . $suffix++;
-        }
+        [$user, $shopOwner] = DB::transaction(function () use ($request, $presets) {
+            $base = Str::slug($request->owner_name, '_') ?: 'user';
+            $username = $base;
+            for ($n = 1; User::where('username', $username)->exists(); $n++) {
+                $username = $base . '_' . $n;
+            }
 
-        $user = User::create([
-            'name' => $request->owner_name,
-            'username' => $username,
-            'email' => $request->email,
-            'password' => bcrypt($request->password),
-            'role' => 'shop_owner',
-        ]);
+            $user = User::create([
+                'name' => $request->owner_name,
+                'username' => $username,
+                'email' => $request->email,
+                'password' => bcrypt($request->password),
+                'role' => 'shop_owner',
+            ]);
 
-        // Default to Free plan (plan_id = 1)
-        // The plan determines which modules and features are available
-        $shopOwner = ShopOwner::create([
-            'user_id' => $user->id,
-            'shop_name' => $request->shop_name,
-            'location' => null,
-            'plan_id' => 1, // Default to Free plan
-            'staff_count' => 0,
-        ]);
+            $shop = ShopOwner::create([
+                'user_id' => $user->id,
+                'shop_name' => $request->shop_name,
+                'location' => null,
+                'plan_id' => 1,
+                'staff_count' => 0,
+            ]);
+
+            $presets->createGenericBlueprint($shop);
+
+            return [$user, $shop];
+        });
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
         $userData = $user->toArray();
-        $userData['permissions'] = []; // Shop owners have all permissions
+        $userData['permissions'] = [];
 
         return response()->json([
             'user' => $userData,
@@ -225,5 +236,28 @@ class AuthController extends Controller
             'message' => 'Profile updated successfully',
             'user' => $user->toArray(),
         ]);
+    }
+
+    public function changePassword(Request $request)
+    {
+        $data = $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:8|confirmed|different:current_password',
+        ]);
+
+        $user = $request->user();
+        abort_unless(Hash::check($data['current_password'], $user->password), 422, 'Current password is incorrect.');
+
+        $current = $user->currentAccessToken();
+        $user->tokens()->delete();
+
+        $user->forceFill(['password' => Hash::make($data['password'])])->save();
+
+        if ($current) {
+            $newToken = $user->createToken('auth-token')->plainTextToken;
+            return response()->json(['message' => 'Password changed.', 'token' => $newToken]);
+        }
+
+        return response()->json(['message' => 'Password changed.']);
     }
 }

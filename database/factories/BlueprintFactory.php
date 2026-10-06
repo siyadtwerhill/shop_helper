@@ -19,20 +19,20 @@ class BlueprintFactory extends Factory
             'is_default' => false,
             'status' => 'active',
             'capabilities' => [
-                'variants' => fake()->boolean(),
-                'bundles' => fake()->boolean(),
-                'batch_expiry' => fake()->boolean(),
-                'serial_numbers' => fake()->boolean(),
-                'decimal_quantities' => fake()->boolean(),
+                'variants' => false,
+                'bundles' => false,
+                'batch_expiry' => false,
+                'serial_numbers' => false,
+                'decimal_quantities' => true,
                 'multiple_units' => true,
             ],
             'pricing_policy' => [
                 'allowed_modes' => ['fixed', 'negotiable', 'wholesale'],
                 'default_mode' => 'fixed',
-                'min_margin_percent' => fake()->numberBetween(10, 30),
-                'cost_required' => true,
+                'min_margin_percent' => 20,
+                'cost_required' => false,
                 'block_below_margin' => false,
-                'price_per_variant' => fake()->boolean(),
+                'price_per_variant' => false,
             ],
             'unit_policy' => [
                 'default_base_unit_id' => null, // Will be set in afterMaking callback

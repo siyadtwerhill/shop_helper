@@ -7,6 +7,7 @@ use App\Models\Branch;
 use App\Models\Role;
 use App\Models\Staff;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Spatie\Permission\PermissionRegistrar;
 
 class BranchController extends Controller
@@ -63,7 +64,7 @@ class BranchController extends Controller
             'name' => 'required|string|max:255',
             'address' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:255',
-            'head_staff_id' => 'nullable|exists:staff,id',
+            'head_staff_id' => ['nullable', Rule::exists('staff', 'id')->where('shop_owner_id', $shop->id)],
         ]);
 
         $branch = Branch::create([
@@ -96,14 +97,14 @@ class BranchController extends Controller
             'name' => 'sometimes|string|max:255',
             'address' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:255',
-            'head_staff_id' => 'nullable|exists:staff,id',
+            'head_staff_id' => ['nullable', Rule::exists('staff', 'id')->where('shop_owner_id', $shop->id)],
             'is_active' => 'sometimes|boolean',
         ]);
 
         $branch->update($request->only(['name', 'address', 'phone', 'is_active']));
 
         if ($request->has('head_staff_id')) {
-            $this->assignHead($branch, $data['head_staff_id'] ?? null);
+            $this->assignHead($branch, $data['head_staff_id']);
         }
 
         return response()->json(['message' => 'Branch updated.', 'branch' => $branch->fresh('head.user')]);

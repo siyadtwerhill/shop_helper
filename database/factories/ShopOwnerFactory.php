@@ -10,6 +10,15 @@ class ShopOwnerFactory extends Factory
 {
     protected $model = ShopOwner::class;
 
+    public function configure(): static
+    {
+        return $this->afterCreating(function (\App\Models\ShopOwner $shop) {
+            if (! \App\Models\Blueprint::where('shop_owner_id', $shop->id)->exists()) {
+                app(\App\Services\BlueprintPresetService::class)->createGenericBlueprint($shop);
+            }
+        });
+    }
+
     public function definition(): array
     {
         return [

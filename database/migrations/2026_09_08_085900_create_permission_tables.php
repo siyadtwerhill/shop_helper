@@ -51,10 +51,7 @@ return new class extends Migration
             if ($teams) {
                 $table->unsignedBigInteger($columnNames['team_foreign_key'])->nullable();
                 $table->index($columnNames['team_foreign_key']);
-                $table->foreign($columnNames['team_foreign_key'])
-                    ->references('id')
-                    ->on('shop_owners')
-                    ->onDelete('cascade');
+                // Foreign key added in later migration after shop_owners table exists
             }
 
             $table->primary([$columnNames['model_morph_key'], 'permission_id', 'model_type']);
@@ -76,10 +73,7 @@ return new class extends Migration
             if ($teams) {
                 $table->unsignedBigInteger($columnNames['team_foreign_key'])->nullable();
                 $table->index($columnNames['team_foreign_key']);
-                $table->foreign($columnNames['team_foreign_key'])
-                    ->references('id')
-                    ->on('shop_owners')
-                    ->onDelete('cascade');
+                // Foreign key added in later migration after shop_owners table exists
             }
 
             $table->primary([$columnNames['model_morph_key'], 'role_id', 'model_type']);

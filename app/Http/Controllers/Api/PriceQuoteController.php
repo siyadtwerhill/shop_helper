@@ -7,11 +7,14 @@ use App\Exceptions\MinimumMarginViolationException;
 use App\Exceptions\PriceBelowMinimumException;
 use App\Models\Product;
 use App\Services\PricingService;
+use App\Traits\ResolvesShop;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
 
 class PriceQuoteController extends Controller
 {
+    use ResolvesShop;
+
     public function __construct(private PricingService $pricing)
     {
     }
@@ -26,7 +29,7 @@ class PriceQuoteController extends Controller
             'requested_price' => 'nullable|numeric|min:0',
         ]);
 
-        $product = Product::findOrFail($data['product_id']);
+        $product = $this->ownedProduct($request, Product::findOrFail($data['product_id']));
         $productUnit = $product->units()->findOrFail($data['unit_id']);
 
         try {

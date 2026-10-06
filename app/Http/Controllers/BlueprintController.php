@@ -326,6 +326,13 @@ class BlueprintController extends Controller
         ]);
     }
 
+    public function form(Request $request, Blueprint $blueprint): JsonResponse
+    {
+        $this->ownedBlueprint($request, $blueprint);
+
+        return response()->json($this->schemaResolver->formFor($blueprint));
+    }
+
     /**
      * Get available presets
      */

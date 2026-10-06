@@ -34,7 +34,7 @@ class PosSaleController extends Controller
         $sale = DB::transaction(function () use ($data, $shop, $request) {
             $sale = Sale::create([
                 'shop_owner_id'   => $shop->id,
-                'discount_amount' => $data['discount_amount'] ?? 0,
+                'total_discount'  => $data['discount_amount'] ?? 0,
                 'subtotal'        => 0,
                 'total_amount'    => 0,
                 'status'          => 'completed',

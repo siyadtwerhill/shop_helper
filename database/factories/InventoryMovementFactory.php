@@ -16,7 +16,7 @@ class InventoryMovementFactory extends Factory
         return [
             'product_id' => Product::factory(),
             'variant_id' => null,
-            'unit_id' => ProductUnit::factory(),
+            'unit_id' => null,
             'quantity' => $this->faker->randomFloat(4, 1, 100),
             'base_quantity' => $this->faker->randomFloat(4, 1, 100),
             'movement_type' => $this->faker->randomElement(['purchase', 'sale', 'sale_return', 'purchase_return', 'adjustment', 'damage', 'opening_stock']),
@@ -25,5 +25,10 @@ class InventoryMovementFactory extends Factory
             'note' => $this->faker->optional()->sentence(),
             'created_by' => null,
         ];
+    }
+
+    public function forProduct(Product $product): static
+    {
+        return $this->state(fn () => ['product_id' => $product->id]);
     }
 }

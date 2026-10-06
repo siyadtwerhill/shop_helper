@@ -118,7 +118,12 @@ class BlueprintPresetService
             'key' => 'season',
             'label' => 'Season',
             'type' => 'select',
-            'options' => ['Spring', 'Summer', 'Fall', 'Winter'],
+            'options' => [
+                ['value' => 'spring', 'label' => 'Spring', 'active' => true],
+                ['value' => 'summer', 'label' => 'Summer', 'active' => true],
+                ['value' => 'fall', 'label' => 'Fall', 'active' => true],
+                ['value' => 'winter', 'label' => 'Winter', 'active' => true],
+            ],
             'validation' => ['nullable', 'string'],
         ]);
 
@@ -127,7 +132,14 @@ class BlueprintPresetService
             'key' => 'color',
             'label' => 'Color',
             'type' => 'select',
-            'options' => ['Black', 'White', 'Navy', 'Red', 'Blue', 'Green'],
+            'options' => [
+                ['value' => 'black', 'label' => 'Black', 'active' => true],
+                ['value' => 'white', 'label' => 'White', 'active' => true],
+                ['value' => 'navy', 'label' => 'Navy', 'active' => true],
+                ['value' => 'red', 'label' => 'Red', 'active' => true],
+                ['value' => 'blue', 'label' => 'Blue', 'active' => true],
+                ['value' => 'green', 'label' => 'Green', 'active' => true],
+            ],
             'validation' => ['nullable', 'string'],
         ]);
 
@@ -136,7 +148,14 @@ class BlueprintPresetService
             'key' => 'size',
             'label' => 'Size',
             'type' => 'select',
-            'options' => ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+            'options' => [
+                ['value' => 'xs', 'label' => 'XS', 'active' => true],
+                ['value' => 's', 'label' => 'S', 'active' => true],
+                ['value' => 'm', 'label' => 'M', 'active' => true],
+                ['value' => 'l', 'label' => 'L', 'active' => true],
+                ['value' => 'xl', 'label' => 'XL', 'active' => true],
+                ['value' => 'xxl', 'label' => 'XXL', 'active' => true],
+            ],
             'validation' => ['nullable', 'string'],
         ]);
 

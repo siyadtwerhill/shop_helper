@@ -21,8 +21,8 @@ class ProductBarcodeFactory extends Factory
         ];
     }
 
-    public function primary(): static
+    public function forProduct(\App\Models\Product $product): static
     {
-        return $this->state(fn () => ['is_primary' => true]);
+        return $this->state(fn () => ['product_id' => $product->id, 'shop_owner_id' => $product->shop_owner_id]);
     }
 }

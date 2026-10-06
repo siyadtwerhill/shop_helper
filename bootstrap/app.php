@@ -25,11 +25,16 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'superadmin' => \App\Http\Middleware\IsSuperAdmin::class,
-            'shopowner' => \App\Http\Middleware\IsShopOwner::class,
+            'shopowner'  => \App\Http\Middleware\IsShopOwner::class,
+            'can.perm'   => \App\Http\Middleware\RequirePermission::class,
+            'active'     => \App\Http\Middleware\EnsureActiveAccount::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (\App\Exceptions\InsufficientStockException $e, $request) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        });
+        $exceptions->render(function (\App\Exceptions\PriceBelowMinimumException|\App\Exceptions\MinimumMarginViolationException $e, $request) {
             return response()->json(['message' => $e->getMessage()], 422);
         });
     })

@@ -33,10 +33,10 @@ class InventoryMovement extends Model
         return $this->belongsTo(Product::class);
     }
 
-    /** The product_units row this movement was recorded in (has the conversion_factor used). */
+    /** The unit (catalog unit) this movement was recorded in. */
     public function unit()
     {
-        return $this->belongsTo(ProductUnit::class, 'unit_id');
+        return $this->belongsTo(Unit::class, 'unit_id');
     }
 
     public function creator()

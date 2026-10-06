@@ -35,7 +35,7 @@ class ProductFactory extends Factory
             'blueprint_id' => null,
             'blueprint_version' => 1,
             'stock_mode' => 'own',
-            'attributes' => null,
+            'custom_fields' => null,
         ];
     }
 

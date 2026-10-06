@@ -21,9 +21,17 @@ class ProductScannerControllerTest extends TestCase
 
     public function test_scanning_a_known_barcode_returns_the_product(): void
     {
-        $user = User::factory()->create();
-        $product = Product::factory()->create();
-        ProductBarcode::factory()->for($product)->create(['barcode' => '8901234567890']);
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        $product = Product::factory()->for($shop)->create();
+        ProductBarcode::factory()->create([
+            'product_id' => $product->id,
+            'shop_owner_id' => $shop->id,
+            'barcode' => '8901234567890',
+        ]);
 
         $response = $this->actingAs($user)->postJson('/api/scanner/lookup', ['code' => '8901234567890']);
 
@@ -34,7 +42,10 @@ class ProductScannerControllerTest extends TestCase
 
     public function test_scanning_an_unknown_barcode_returns_404_with_the_code_for_prefill(): void
     {
-        $user = User::factory()->create();
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
 
         $response = $this->actingAs($user)->postJson('/api/scanner/lookup', ['code' => '0000000000000']);
 

@@ -95,6 +95,7 @@ class ProductController extends Controller
     public function store(Request $request)
     {
         $shop = $this->shop($request);
+        $this->authorizeAction($request, 'products.create');
 
         // multipart sends custom_fields as a JSON string
         if (is_string($request->input('custom_fields'))) {
@@ -277,6 +278,7 @@ class ProductController extends Controller
     {
         $shop = $this->shop($request);
         $this->ownedProduct($request, $product);
+        $this->authorizeAction($request, 'products.edit');
 
         if (is_string($request->input('custom_fields'))) {
             $request->merge(['custom_fields' => json_decode($request->input('custom_fields'), true) ?? []]);
@@ -296,7 +298,7 @@ class ProductController extends Controller
             'status' => 'sometimes|in:active,inactive',
             // a mode removed from the blueprint later stays valid for products already using it
             'pricing_mode' => ['sometimes', Rule::in(array_merge($this->allowedModes($policy), [$product->pricing_mode]))],
-            'cost_price' => [($policy['cost_required'] ?? false) ? 'required' : 'nullable', 'numeric', 'min:0'],
+            'cost_price' => ['sometimes', ($policy['cost_required'] ?? false) ? 'required' : 'nullable', 'numeric', 'min:0'],
             'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
             'min_price' => 'nullable|numeric|min:0',
             'min_stock' => 'nullable|numeric|min:0',
@@ -410,6 +412,7 @@ class ProductController extends Controller
     public function destroy(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
+        $this->authorizeAction($request, 'products.delete');
 
         $names = $product->usedInBundles()->with('bundle.product:id,name')->get()
             ->pluck('bundle.product.name')->filter()->unique()->values();

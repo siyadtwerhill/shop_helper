@@ -16,10 +16,6 @@ return new class extends Migration
             Schema::table('model_has_permissions', function (Blueprint $table) {
                 $table->unsignedBigInteger('shop_owner_id')->nullable()->after('model_type');
                 $table->index('shop_owner_id');
-                $table->foreign('shop_owner_id')
-                    ->references('id')
-                    ->on('shop_owners')
-                    ->onDelete('cascade');
             });
         }
 
@@ -28,11 +24,30 @@ return new class extends Migration
             Schema::table('model_has_roles', function (Blueprint $table) {
                 $table->unsignedBigInteger('shop_owner_id')->nullable()->after('model_type');
                 $table->index('shop_owner_id');
+            });
+        }
+
+        // Add foreign keys to shop_owners after the table exists
+        try {
+            Schema::table('model_has_permissions', function (Blueprint $table) {
                 $table->foreign('shop_owner_id')
                     ->references('id')
                     ->on('shop_owners')
                     ->onDelete('cascade');
             });
+        } catch (\Exception $e) {
+            // Foreign key fails if shop_owners doesn't exist yet
+        }
+
+        try {
+            Schema::table('model_has_roles', function (Blueprint $table) {
+                $table->foreign('shop_owner_id')
+                    ->references('id')
+                    ->on('shop_owners')
+                    ->onDelete('cascade');
+            });
+        } catch (\Exception $e) {
+            // Foreign key fails if shop_owners doesn't exist yet
         }
 
         // Update primary keys to include shop_owner_id for proper team scoping

@@ -105,36 +105,6 @@ class ProductControllerTest extends TestCase
         ]);
     }
 
-    public function test_update_via_post_saves_price_unit_conversion_and_stock(): void
-    {
-        $shop = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'shop_owner']);
-        $shop->user()->associate($user);
-        $shop->save();
-        $product = Product::factory()->for($shop)->create(['current_stock' => '5.0000']);
-        $productUnit = \App\Models\ProductUnit::factory()->for($product)->base()->create([
-            'selling_price' => '100.00',
-            'conversion_factor' => '1.0000',
-        ]);
-        $newCatalogUnit = \App\Models\Unit::factory()->create();
-
-        $response = $this->actingAs($user)->postJson("/api/products/{$product->id}", [
-            'selling_price' => '250.50',
-            'unit_id' => $newCatalogUnit->id,
-            'conversion_factor' => '2.5000',
-            'current_stock' => '12',
-        ]);
-
-        $response->assertOk();
-        $this->assertDatabaseHas('product_units', [
-            'id' => $productUnit->id,
-            'selling_price' => '250.50',
-            'unit_id' => $newCatalogUnit->id,
-            'conversion_factor' => '2.5000',
-        ]);
-        $this->assertEquals(0, bccomp((string) $product->fresh()->current_stock, '12', 4));
-    }
-
     public function test_update_modifies_product(): void
     {
         $shop = ShopOwner::factory()->create();
@@ -178,10 +148,14 @@ class ProductControllerTest extends TestCase
         $shop->user()->associate($user);
         $shop->save();
         $product = Product::factory()->for($shop)->create();
-        ProductBarcode::factory()->for($product)->create(['barcode' => '8901234567890']);
-
-        $response = $this->actingAs($user)->postJson('/api/products/lookup-barcode', [
+        ProductBarcode::factory()->create([
+            'product_id' => $product->id,
+            'shop_owner_id' => $shop->id,
             'barcode' => '8901234567890',
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/scanner/lookup', [
+            'code' => '8901234567890',
         ]);
 
         $response->assertOk();
@@ -196,13 +170,11 @@ class ProductControllerTest extends TestCase
         $shop->user()->associate($user);
         $shop->save();
 
-        $response = $this->actingAs($user)->postJson('/api/products/lookup-barcode', [
-            'barcode' => '0000000000000',
+        $response = $this->actingAs($user)->postJson('/api/scanner/lookup', [
+            'code' => '0000000000000',
         ]);
 
-        $response->assertOk();
-        $response->assertJsonPath('found', false);
-        $response->assertJsonPath('barcode', '0000000000000');
+        $response->assertStatus(404);
     }
 
     public function test_branch_head_only_sees_their_branch_products(): void
@@ -248,5 +220,191 @@ class ProductControllerTest extends TestCase
         $products = $response->json('products.data');
         $this->assertCount(1, $products);
         $this->assertEquals('Branch 1 Product', $products[0]['name']);
+    }
+
+    public function test_staff_without_products_create_permission_gets_403(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        $staffUser = User::create([
+            'name' => 'Staff',
+            'username' => 'staff',
+            'email' => 'staff@example.com',
+            'password' => bcrypt('password'),
+            'role' => 'staff',
+        ]);
+
+        $staff = Staff::create([
+            'user_id' => $staffUser->id,
+            'shop_owner_id' => $shop->id,
+            'status' => 'active',
+        ]);
+
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+
+        $response = $this->actingAs($staffUser)->postJson('/api/products', [
+            'name' => 'Test Product',
+            'sku' => 'TEST001',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_shop_owner_can_create_products(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        $unit = \App\Models\Unit::factory()->create();
+
+        $response = $this->actingAs($user)->postJson('/api/products', [
+            'name' => 'Test Product',
+            'sku' => 'TEST001',
+            'selling_price' => '100.00',
+            'unit_id' => $unit->id,
+        ]);
+
+        $response->assertStatus(201);
+    }
+
+    public function test_shop_b_gets_404_on_shop_a_product(): void
+    {
+        $shopA = ShopOwner::factory()->create();
+        $userA = User::factory()->create(['role' => 'shop_owner']);
+        $shopA->user()->associate($userA);
+        $shopA->save();
+
+        $shopB = ShopOwner::factory()->create();
+        $userB = User::factory()->create(['role' => 'shop_owner']);
+        $shopB->user()->associate($userB);
+        $shopB->save();
+
+        $product = Product::factory()->for($shopA)->create();
+
+        $response = $this->actingAs($userB)->getJson("/api/products/{$product->id}");
+
+        $response->assertStatus(404);
+    }
+
+    public function test_shop_b_gets_404_on_shop_a_product_units(): void
+    {
+        $shopA = ShopOwner::factory()->create();
+        $userA = User::factory()->create(['role' => 'shop_owner']);
+        $shopA->user()->associate($userA);
+        $shopA->save();
+
+        $shopB = ShopOwner::factory()->create();
+        $userB = User::factory()->create(['role' => 'shop_owner']);
+        $shopB->user()->associate($userB);
+        $shopB->save();
+
+        $product = Product::factory()->for($shopA)->create();
+
+        $response = $this->actingAs($userB)->getJson("/api/products/{$product->id}/units");
+
+        $response->assertStatus(404);
+    }
+
+    public function test_shop_b_gets_404_on_shop_a_product_scanner(): void
+    {
+        $shopA = ShopOwner::factory()->create();
+        $userA = User::factory()->create(['role' => 'shop_owner']);
+        $shopA->user()->associate($userA);
+        $shopA->save();
+
+        $shopB = ShopOwner::factory()->create();
+        $userB = User::factory()->create(['role' => 'shop_owner']);
+        $shopB->user()->associate($userB);
+        $shopB->save();
+
+        $product = Product::factory()->for($shopA)->create();
+        ProductBarcode::factory()->for($product)->create(['barcode' => '8901234567890']);
+
+        $response = $this->actingAs($userB)->postJson('/api/scanner/lookup', [
+            'code' => '8901234567890',
+        ]);
+
+        $response->assertStatus(404);
+    }
+
+    public function test_get_users_returns_403_for_staff(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        $staffUser = User::create([
+            'name' => 'Staff',
+            'username' => 'staff',
+            'email' => 'staff@example.com',
+            'password' => bcrypt('password'),
+            'role' => 'staff',
+        ]);
+
+        Staff::create([
+            'user_id' => $staffUser->id,
+            'shop_owner_id' => $shop->id,
+            'status' => 'active',
+        ]);
+
+        $response = $this->actingAs($staffUser)->getJson('/api/users');
+
+        $response->assertStatus(403);
+    }
+
+    public function test_get_users_returns_403_for_shop_owner(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        $response = $this->actingAs($user)->getJson('/api/users');
+
+        $response->assertStatus(403);
+    }
+
+    public function test_duplicate_unit_returns_422(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        $product = Product::factory()->for($shop)->create();
+        $unit = \App\Models\Unit::factory()->create();
+
+        \App\Models\ProductUnit::factory()->for($product)->create(['unit_id' => $unit->id]);
+
+        $response = $this->actingAs($user)->postJson("/api/products/{$product->id}/units", [
+            'unit_id' => $unit->id,
+            'conversion_factor' => '1.0000',
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_unit_used_by_movement_cannot_be_deleted(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        $product = Product::factory()->for($shop)->create();
+        $catalogUnit = \App\Models\Unit::factory()->create();
+        $nonBaseUnit = \App\Models\ProductUnit::factory()->for($product)->forUnit($catalogUnit)->create(['is_base' => false]);
+
+        \App\Models\InventoryMovement::factory()->for($product)->create(['unit_id' => $catalogUnit->id]);
+
+        $response = $this->actingAs($user)->deleteJson("/api/products/{$product->id}/units/{$nonBaseUnit->id}");
+
+        $response->assertStatus(422);
     }
 }

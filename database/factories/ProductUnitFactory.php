@@ -42,4 +42,9 @@ class ProductUnitFactory extends Factory
     {
         return $this->state(fn () => ['product_id' => $product->id]);
     }
+
+    public function forUnit(Unit $unit): static
+    {
+        return $this->state(fn () => ['unit_id' => $unit->id]);
+    }
 }

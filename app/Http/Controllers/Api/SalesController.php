@@ -3,136 +3,116 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\InventoryMovement;
+use App\Models\Product;
+use App\Models\ProductUnit;
+use App\Models\ProductVariant;
 use App\Models\Sale;
 use App\Models\SaleItem;
+use App\Services\InventoryMovementService;
+use App\Traits\ResolvesShop;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SalesController extends Controller
 {
-    /** Sales overview with metrics */
+    use ResolvesShop;
+
+    public function __construct(private InventoryMovementService $movements) {}
+
     public function overview(Request $request)
     {
-        $shop = $request->user()->shopOwner ?? $request->user()->staff?->shopOwner;
-        abort_unless($shop, 403);
+        $shop = $this->shop($request);
+        $this->authorizeAction($request, 'sales.view');
 
+        $done = fn () => Sale::where('shop_owner_id', $shop->id)->where('status', 'completed');
         $today = now()->startOfDay();
-        $thisMonth = now()->startOfMonth();
+        $month = now()->startOfMonth();
 
-        $sales = Sale::where('shop_owner_id', $shop->id)
-            ->where('status', 'completed');
-
-        $totalSales = $sales->clone()->sum('total_amount');
-        $todaySales = $sales->clone()->where('created_at', '>=', $today)->sum('total_amount');
-        $monthSales = $sales->clone()->where('created_at', '>=', $thisMonth)->sum('total_amount');
-        $orderCount = $sales->clone()->count();
-        $todayOrderCount = $sales->clone()->where('created_at', '>=', $today)->count();
-
-        // Recent sales
-        $recentSales = Sale::where('shop_owner_id', $shop->id)
-            ->where('status', 'completed')
-            ->with(['items.product:id,name', 'createdBy:id,name'])
-            ->latest()
-            ->take(10)
-            ->get();
-
-        // Top selling products
-        $topProducts = SaleItem::whereHas('sale', fn ($q) => $q->where('shop_owner_id', $shop->id))
+        $top = SaleItem::whereHas('sale', fn ($q) => $q->where('shop_owner_id', $shop->id)->where('status', 'completed'))
             ->with('product:id,name')
-            ->selectRaw('product_id, SUM(quantity) as total_quantity, SUM(quantity * unit_price) as total_revenue')
-            ->groupBy('product_id')
-            ->orderByDesc('total_quantity')
-            ->limit(5)
-            ->get();
+            ->selectRaw('product_id, SUM(base_quantity) as total_quantity, SUM(quantity * unit_price) as total_revenue')
+            ->groupBy('product_id')->orderByDesc('total_quantity')->limit(5)->get();
 
         return response()->json([
             'metrics' => [
-                'total_sales' => $totalSales,
-                'today_sales' => $todaySales,
-                'month_sales' => $monthSales,
-                'total_orders' => $orderCount,
-                'today_orders' => $todayOrderCount,
+                'total_sales' => $done()->sum('total_amount'),
+                'today_sales' => $done()->where('created_at', '>=', $today)->sum('total_amount'),
+                'month_sales' => $done()->where('created_at', '>=', $month)->sum('total_amount'),
+                'total_orders' => $done()->count(),
+                'today_orders' => $done()->where('created_at', '>=', $today)->count(),
             ],
-            'recent_sales' => $recentSales,
-            'top_products' => $topProducts,
+            'recent_sales' => $done()->with(['items.product:id,name', 'createdBy:id,name'])->latest('id')->take(10)->get(),
+            'top_products' => $top,
         ]);
     }
 
-    /** List all sales */
     public function index(Request $request)
     {
-        $shop = $request->user()->shopOwner ?? $request->user()->staff?->shopOwner;
-        abort_unless($shop, 403);
+        $shop = $this->shop($request);
+        $this->authorizeAction($request, 'sales.view');
 
         return Sale::where('shop_owner_id', $shop->id)
+            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->status))
             ->with(['items.product:id,name', 'createdBy:id,name'])
-            ->latest()
-            ->paginate(20);
+            ->latest('id')->paginate(20);
     }
 
-    /** Show single sale */
     public function show(Request $request, Sale $sale)
     {
-        $shop = $request->user()->shopOwner ?? $request->user()->staff?->shopOwner;
-        abort_unless($shop, 403);
-        abort_unless($sale->shop_owner_id === $shop->id, 403);
+        abort_unless($sale->shop_owner_id === $this->shop($request)->id, 404);
+        $this->authorizeAction($request, 'sales.view');
 
-        return $sale->load(['items.product', 'createdBy']);
+        return $sale->load(['items.product:id,name,sku', 'createdBy:id,name']);
     }
 
-    /** Create sale (manual entry) */
-    public function store(Request $request)
+    public function void(Request $request, Sale $sale)
     {
-        $shop = $request->user()->shopOwner ?? $request->user()->staff?->shopOwner;
-        abort_unless($shop, 403);
+        $shop = $this->shop($request);
+        abort_unless($sale->shop_owner_id === $shop->id, 404);
+        $this->authorizeAction($request, 'sales.delete');
 
-        $data = $request->validate([
-            'total_amount' => 'required|numeric|min:0',
-            'total_discount' => 'nullable|numeric|min:0',
-            'payment_method' => 'nullable|string',
-            'status' => 'nullable|in:pending,completed,cancelled',
-        ]);
+        $data = $request->validate(['reason' => 'required|string|max:255']);
 
-        $sale = Sale::create([
-            'shop_owner_id' => $shop->id,
-            'subtotal' => $data['total_amount'],
-            'total_amount' => $data['total_amount'],
-            'total_discount' => $data['total_discount'] ?? 0,
-            'payment_method' => $data['payment_method'] ?? null,
-            'status' => $data['status'] ?? 'pending',
-            'created_by' => $request->user()->id,
-        ]);
+        DB::transaction(function () use ($sale, $data, $request) {
+            $locked = Sale::whereKey($sale->id)->lockForUpdate()->firstOrFail();
+            abort_if($locked->status === 'voided', 409, 'This sale is already voided.');
+            abort_if($locked->status !== 'completed', 422, 'Only completed sales can be voided.');
 
-        return response()->json($sale, 201);
-    }
+            $itemIds = $locked->items()->pluck('id');
 
-    /** Update sale */
-    public function update(Request $request, Sale $sale)
-    {
-        $shop = $request->user()->shopOwner ?? $request->user()->staff?->shopOwner;
-        abort_unless($shop, 403);
-        abort_unless($sale->shop_owner_id === $shop->id, 403);
+            $sold = InventoryMovement::where('movement_type', 'sale')
+                ->where(function ($q) use ($locked, $itemIds) {
+                    $q->where(fn ($a) => $a->where('reference_type', SaleItem::class)->whereIn('reference_id', $itemIds))
+                      ->orWhere(fn ($b) => $b->where('reference_type', Sale::class)->where('reference_id', $locked->id));
+                })->get();
 
-        $data = $request->validate([
-            'total_amount' => 'nullable|numeric|min:0',
-            'total_discount' => 'nullable|numeric|min:0',
-            'payment_method' => 'nullable|string',
-            'status' => 'nullable|in:pending,completed,cancelled',
-        ]);
+            foreach ($sold as $m) {
+                $product = Product::withTrashed()->findOrFail($m->product_id);
 
-        $sale->update($data);
+                if ($product->stock_mode === 'from_components') {
+                    continue;
+                }
 
-        return response()->json($sale);
-    }
+                $this->movements->saleReturn(
+                    $product,
+                    ProductUnit::findOrFail($m->unit_id),
+                    ltrim((string) $m->quantity, '-'),
+                    Sale::class,
+                    $locked->id,
+                    $request->user()->id,
+                    $m->variant_id ? ProductVariant::withTrashed()->find($m->variant_id) : null,
+                );
+            }
 
-    /** Delete sale */
-    public function destroy(Request $request, Sale $sale)
-    {
-        $shop = $request->user()->shopOwner ?? $request->user()->staff?->shopOwner;
-        abort_unless($shop, 403);
-        abort_unless($sale->shop_owner_id === $shop->id, 403);
+            $locked->forceFill([
+                'status' => 'voided',
+                'voided_at' => now(),
+                'voided_by' => $request->user()->id,
+                'void_reason' => $data['reason'],
+            ])->save();
+        });
 
-        $sale->delete();
-
-        return response()->json(null, 204);
+        return response()->json($sale->fresh());
     }
 }

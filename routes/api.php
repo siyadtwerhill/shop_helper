@@ -11,12 +11,10 @@ use App\Http\Controllers\Api\ProductUnitController;
 use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Api\InventoryMovementController;
 use App\Http\Controllers\Api\ProductScannerController;
-use App\Http\Controllers\Api\SaleItemController;
 use App\Http\Controllers\Api\PriceQuoteController;
 use App\Http\Controllers\Api\ProductPriceRuleController;
 use App\Http\Controllers\Api\ProductVariantController;
 use App\Http\Controllers\Api\ProductBundleController;
-use App\Http\Controllers\Api\BundleSaleItemController;
 use App\Http\Controllers\Api\ProductActivityLogController;
 use App\Http\Controllers\Api\ProductLabelController;
 use App\Http\Controllers\Api\ActivityFeedController;
@@ -36,7 +34,7 @@ use App\Http\Controllers\ShopOwner\RoleController;
 use App\Http\Controllers\ShopOwner\BranchController;
 use Spatie\Permission\PermissionRegistrar;
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+Route::middleware(['auth:sanctum', 'active'])->get('/user', function (Request $request) {
     $user = $request->user();
 
     // Load relationships based on role.
@@ -74,14 +72,15 @@ Route::post('/register', [AuthController::class, 'register']);
 
 // One login endpoint for every role — role is read from the user row,
 // not guessed by the frontend across three separate endpoints.
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
 // Only shop owner registration is public - staff are created by shop owners
-Route::post('/shop-owner/register', [AuthController::class, 'shopOwnerRegister']);
+Route::post('/shop-owner/register', [AuthController::class, 'shopOwnerRegister'])->middleware('throttle:5,1');
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/profile', [AuthController::class, 'updateProfile']);
+    Route::post('/profile/password', [AuthController::class, 'changePassword'])->middleware('throttle:5,1');
 
     // Shop-owner subscription management
     Route::get('/subscription', [SubscriptionController::class, 'show']);
@@ -90,31 +89,41 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/subscription/payments/{payment}/proof', [SubscriptionController::class, 'uploadProof']);
     Route::post('/subscription/downgrade', [SubscriptionController::class, 'scheduleDowngrade']);
 
-    Route::get('/users', [UserController::class, 'index']);
-    Route::get('/users/{id}', [UserController::class, 'show']);
-    Route::get('/users/role/{role}', [UserController::class, 'getUsersByRole']);
+    Route::middleware('superadmin')->group(function () {
+        Route::get('/users', [UserController::class, 'index']);
+        Route::get('/users/{id}', [UserController::class, 'show']);
+        Route::get('/users/role/{role}', [UserController::class, 'getUsersByRole']);
+        Route::post('/users', [UserController::class, 'store']);
+        Route::put('/users/{id}/role', [UserController::class, 'updateRole']);
+        Route::delete('/users/{id}', [UserController::class, 'destroy']);
+    });
 
     // ---- Employee Management (shop_owner / branch_head) ----
-    // Temporarily removed permission middleware for frontend testing
-    Route::get('/employees', [EmployeeController::class, 'index']);
-    Route::post('/employees', [EmployeeController::class, 'store']);
-    Route::put('/employees/{staff}', [EmployeeController::class, 'update']);
-    Route::post('/employees/{staff}/reset-password', [EmployeeController::class, 'resetPassword']);
-    Route::delete('/employees/{staff}', [EmployeeController::class, 'destroy']);
+    Route::middleware('can.perm:employees.view')->get('/employees', [EmployeeController::class, 'index']);
+    Route::middleware('can.perm:employees.create')->post('/employees', [EmployeeController::class, 'store']);
+    Route::middleware('can.perm:employees.edit')->group(function () {
+        Route::put('/employees/{staff}', [EmployeeController::class, 'update']);
+        Route::post('/employees/{staff}/reset-password', [EmployeeController::class, 'resetPassword']);
+    });
+    Route::middleware('can.perm:employees.delete')->delete('/employees/{staff}', [EmployeeController::class, 'destroy']);
 
-    // Temporarily removed permission middleware for frontend testing
-    Route::get('/roles', [RoleController::class, 'index']);
-    Route::post('/roles', [RoleController::class, 'store']);
-    Route::get('/roles/{role}/matrix', [RoleController::class, 'matrix']);
-    Route::put('/roles/{role}/permissions', [RoleController::class, 'updatePermissions']);
-    Route::put('/roles/{role}', [RoleController::class, 'update']);
-    Route::delete('/roles/{role}', [RoleController::class, 'destroy']);
+    // ---- Roles & Permissions ----
+    Route::middleware('can.perm:employees.roles.view')->group(function () {
+        Route::get('/roles', [RoleController::class, 'index']);
+        Route::get('/roles/{role}/matrix', [RoleController::class, 'matrix']);
+    });
+    Route::middleware('can.perm:employees.roles.create')->post('/roles', [RoleController::class, 'store']);
+    Route::middleware('can.perm:employees.roles.edit')->group(function () {
+        Route::put('/roles/{role}/permissions', [RoleController::class, 'updatePermissions']);
+        Route::put('/roles/{role}', [RoleController::class, 'update']);
+    });
+    Route::middleware('can.perm:employees.roles.delete')->delete('/roles/{role}', [RoleController::class, 'destroy']);
 
-    // Temporarily removed permission middleware for frontend testing
-    Route::get('/branches', [BranchController::class, 'index']);
-    Route::post('/branches', [BranchController::class, 'store']);
-    Route::put('/branches/{branch}', [BranchController::class, 'update']);
-    Route::delete('/branches/{branch}', [BranchController::class, 'destroy']);
+    // ---- Branches ----
+    Route::middleware('can.perm:branches.view')->get('/branches', [BranchController::class, 'index']);
+    Route::middleware('can.perm:branches.create')->post('/branches', [BranchController::class, 'store']);
+    Route::middleware('can.perm:branches.edit')->put('/branches/{branch}', [BranchController::class, 'update']);
+    Route::middleware('can.perm:branches.delete')->delete('/branches/{branch}', [BranchController::class, 'destroy']);
 
     // ---- Products, Categories, Brands ----
     Route::get('/products', [ProductController::class, 'index']);
@@ -132,6 +141,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/blueprints/presets', [BlueprintController::class, 'presets']);
     Route::get('/blueprints/{blueprint}', [BlueprintController::class, 'show']);
     Route::get('/blueprints/{blueprint}/schema', [BlueprintController::class, 'schema']);
+    Route::get('/blueprints/{blueprint}/form', [BlueprintController::class, 'form']);
     Route::put('/blueprints/{blueprint}', [BlueprintController::class, 'update']);
     Route::delete('/blueprints/{blueprint}', [BlueprintController::class, 'destroy']);
     Route::post('/blueprints/{blueprint}/duplicate', [BlueprintController::class, 'duplicate']);
@@ -152,9 +162,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('products/{product}/movements', [InventoryMovementController::class, 'index']);
     Route::post('products/{product}/movements', [InventoryMovementController::class, 'store']);
-
-    // ---- POS Sale Items ----
-    Route::post('pos/sale-items', [SaleItemController::class, 'store']);
 
     // ---- Pricing ----
     Route::post('pos/price-quote', [PriceQuoteController::class, 'store']);
@@ -178,7 +185,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('products/{product}/bundle', [ProductBundleController::class, 'store']);
     Route::put('products/{product}/bundle', [ProductBundleController::class, 'update']);
     Route::delete('products/{product}/bundle', [ProductBundleController::class, 'destroy']);
-    Route::post('pos/bundle-sale-items', [BundleSaleItemController::class, 'store']);
 
     // ---- Activity Logs ----
     Route::get('products/{product}/activity', [ProductActivityLogController::class, 'index']);
@@ -199,10 +205,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // ---- Sales ----
     Route::get('sales/overview', [SalesController::class, 'overview']);
     Route::get('sales', [SalesController::class, 'index']);
-    Route::post('sales', [SalesController::class, 'store']);
     Route::get('sales/{sale}', [SalesController::class, 'show']);
-    Route::put('sales/{sale}', [SalesController::class, 'update']);
-    Route::delete('sales/{sale}', [SalesController::class, 'destroy']);
+    Route::post('sales/{sale}/void', [SalesController::class, 'void']);
 
     // ---- Customers ----
     Route::apiResource('customers', CustomerController::class);
