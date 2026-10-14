@@ -26,11 +26,10 @@ class ProductFactory extends Factory
             'qr_path' => null,
             'status' => 'active',
             'product_type' => 'neutral',
-            'current_stock' => '0.0000',
             'base_unit_id' => null,
             'pricing_mode' => 'fixed',
-            'cost_price' => $this->faker->optional()->randomFloat(2, 100, 10000),
-            'min_margin_percent' => $this->faker->optional()->randomFloat(2, 5, 50),
+            'cost_price' => null,
+            'min_margin_percent' => null,
             'min_price' => null,
             'blueprint_id' => null,
             'blueprint_version' => 1,
@@ -53,5 +52,10 @@ class ProductFactory extends Factory
             'blueprint_version' => $blueprint->version,
             'stock_mode' => $blueprint->capabilities['variants'] ? 'from_variants' : 'own',
         ]);
+    }
+
+    public function withFloor(string $cost, string $margin): self
+    {
+        return $this->state(['cost_price' => $cost, 'min_margin_percent' => $margin]);
     }
 }

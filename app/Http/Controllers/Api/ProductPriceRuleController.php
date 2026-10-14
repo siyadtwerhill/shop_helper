@@ -16,6 +16,7 @@ class ProductPriceRuleController extends Controller
     public function index(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
+
         return $product->priceRules()->with('unit')->orderBy('unit_id')->orderBy('min_quantity')->get();
     }
 

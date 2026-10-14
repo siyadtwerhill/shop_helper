@@ -68,11 +68,11 @@ class ProductBlueprintIntegrationTest extends TestCase
         }
     }
 
-    public function test_product_attributes_is_json()
+    public function test_product_custom_fields_is_json()
     {
         $blueprint = $this->presetService->createGenericBlueprint($this->shop);
 
-        $attributes = [
+        $customFields = [
             'material' => 'Cotton',
             'season' => 'Summer',
         ];
@@ -80,11 +80,11 @@ class ProductBlueprintIntegrationTest extends TestCase
         $product = Product::factory()->create([
             'shop_owner_id' => $this->shop->id,
             'blueprint_id' => $blueprint->id,
-            'attributes' => $attributes,
+            'custom_fields' => $customFields,
         ]);
 
-        $this->assertIsArray($product->attributes);
-        $this->assertEquals($attributes, $product->attributes);
+        $this->assertIsArray($product->custom_fields);
+        $this->assertEquals($customFields, $product->custom_fields);
     }
 
     public function test_product_stock_mode_enum_values()
@@ -128,7 +128,7 @@ class ProductBlueprintIntegrationTest extends TestCase
             'shop_owner_id' => $this->shop->id,
             'blueprint_id' => $blueprint->id,
             'stock_mode' => 'from_variants',
-            'attributes' => [
+            'custom_fields' => [
                 'material' => 'Cotton',
                 'season' => 'Summer',
             ],
@@ -136,8 +136,8 @@ class ProductBlueprintIntegrationTest extends TestCase
 
         $this->assertEquals($blueprint->id, $product->blueprint_id);
         $this->assertEquals('from_variants', $product->stock_mode);
-        $this->assertEquals('Cotton', $product->attributes['material']);
-        $this->assertEquals('Summer', $product->attributes['season']);
+        $this->assertEquals('Cotton', $product->custom_fields['material']);
+        $this->assertEquals('Summer', $product->custom_fields['season']);
     }
 
     public function test_blueprint_versioning()
@@ -169,7 +169,7 @@ class ProductBlueprintIntegrationTest extends TestCase
         $blueprint1 = $this->presetService->createGenericBlueprint($this->shop);
         $blueprint2 = $this->presetService->createFashionBlueprint($this->shop);
 
-        $this->assertCount(2, $this->shop->blueprints);
+        $this->assertCount(3, $this->shop->blueprints); // 2 created + 1 default from backfill
         $this->assertTrue($this->shop->blueprints->contains($blueprint1));
         $this->assertTrue($this->shop->blueprints->contains($blueprint2));
     }

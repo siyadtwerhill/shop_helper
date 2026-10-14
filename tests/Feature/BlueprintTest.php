@@ -54,7 +54,7 @@ class BlueprintTest extends TestCase
                     ],
                 ],
             ])
-            ->assertJsonCount(1, 'blueprints');
+            ->assertJsonCount(2, 'blueprints'); // 1 created + 1 default from backfill
     }
 
     public function test_shop_owner_can_create_blueprint()
@@ -65,7 +65,6 @@ class BlueprintTest extends TestCase
             'capabilities' => [
                 'variants' => true,
                 'bundles' => false,
-                'multiple_units' => true,
             ],
             'pricing_policy' => [
                 'allowed_modes' => ['fixed', 'negotiable'],
@@ -98,6 +97,25 @@ class BlueprintTest extends TestCase
             'name' => 'Fashion Retail',
             'shop_owner_id' => $this->shop->id,
         ]);
+    }
+
+    public function test_serial_numbers_and_decimal_quantities_cannot_both_be_enabled_on_create_or_update(): void
+    {
+        $capabilities = ['serial_numbers' => true, 'decimal_quantities' => true];
+
+        $this->actingAs($this->shopOwner)->postJson('/api/blueprints', [
+            'name' => 'Invalid capabilities',
+            'capabilities' => $capabilities,
+        ])->assertStatus(422);
+
+        $blueprint = Blueprint::factory()->create([
+            'shop_owner_id' => $this->shop->id,
+            'capabilities' => ['serial_numbers' => true, 'decimal_quantities' => false],
+        ]);
+
+        $this->actingAs($this->shopOwner)->putJson("/api/blueprints/{$blueprint->id}", [
+            'capabilities' => ['decimal_quantities' => true],
+        ])->assertStatus(422);
     }
 
     public function test_shop_owner_can_create_blueprint_with_fields()
@@ -294,14 +312,20 @@ class BlueprintTest extends TestCase
                     'pricing_policy',
                     'unit_policy',
                     'layout',
-                    'fields' => [
+                    'sections' => [
                         '*' => [
                             'key',
                             'label',
-                            'type',
-                            'section',
-                            'required',
-                            'is_variant_axis',
+                            'fields' => [
+                                '*' => [
+                                    'key',
+                                    'label',
+                                    'type',
+                                    'section',
+                                    'required',
+                                    'is_variant_axis',
+                                ],
+                            ],
                         ],
                     ],
                 ],

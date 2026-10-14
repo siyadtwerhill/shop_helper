@@ -42,7 +42,6 @@ class BlueprintPresetServiceTest extends TestCase
             'batch_expiry' => false,
             'serial_numbers' => false,
             'decimal_quantities' => false,
-            'multiple_units' => true,
         ], $blueprint->capabilities);
 
         $this->assertEquals([
@@ -78,7 +77,6 @@ class BlueprintPresetServiceTest extends TestCase
             'batch_expiry' => false,
             'serial_numbers' => false,
             'decimal_quantities' => false,
-            'multiple_units' => true,
         ], $blueprint->capabilities);
 
         $this->assertEquals([

@@ -55,6 +55,7 @@ class ModuleSeeder extends Seeder
             $createdModules['employees']->id,
             $createdModules['branches']->id,
             $createdModules['products']->id,
+            $createdModules['sales']->id,
         ]);
 
         $pro->modules()->sync([

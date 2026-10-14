@@ -7,6 +7,7 @@ use App\Models\FieldDefinition;
 use App\Models\BlueprintField;
 use App\Services\BlueprintPresetService;
 use App\Services\BlueprintSchemaResolver;
+use App\Services\ProductSystemFields;
 use App\Traits\ResolvesShop;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -51,11 +52,72 @@ class BlueprintController extends Controller
     {
         $this->ownedBlueprint($request, $blueprint);
 
-        $blueprint->load(['fields.fieldDefinition']);
+        $blueprint->load(['fields.fieldDefinition'])->loadCount('products');
 
         return response()->json([
             'blueprint' => $blueprint,
         ]);
+    }
+
+    private function fieldRules(): array
+    {
+        return [
+            'fields' => 'sometimes|nullable|array|max:60',
+            'fields.*.key' => ['required', 'alpha_dash', 'max:60', 'distinct'],
+            'fields.*.label' => 'required|string|max:100',
+            'fields.*.type' => ['required', Rule::in(['text','textarea','number','decimal','select','multi_select','checkbox','date','boolean','json'])],
+            'fields.*.options' => 'nullable|array|max:100',
+            'fields.*.validation' => 'nullable|array',
+            'fields.*.section' => 'nullable|string|max:50',
+            'fields.*.sort_order' => 'nullable|integer|min:0',
+            'fields.*.required' => 'nullable|boolean',
+            'fields.*.show_in_list' => 'nullable|boolean',
+            'fields.*.show_in_pos' => 'nullable|boolean',
+            'fields.*.show_on_label' => 'nullable|boolean',
+            'fields.*.is_variant_axis' => 'nullable|boolean',
+            'fields.*.is_filterable' => 'nullable|boolean',
+            'fields.*.is_searchable' => 'nullable|boolean',
+            'fields.*.hidden' => 'nullable|boolean',
+            'system_fields' => 'sometimes|nullable|array',
+            'system_fields.*.hidden' => 'nullable|boolean',
+            'system_fields.*.required' => 'nullable|boolean',
+        ];
+    }
+
+    private function pricingPolicyError(?array $policy): ?JsonResponse
+    {
+        if (empty($policy)) return null;
+
+        $modes = $policy['allowed_modes'] ?? [];
+        $default = $policy['default_mode'] ?? null;
+        $margin = $policy['min_margin_percent'] ?? null;
+
+        if ($bad = array_diff($modes, ['fixed', 'negotiable', 'price_range', 'wholesale'])) {
+            return response()->json(['message' => 'Invalid pricing mode: ' . implode(', ', $bad)], 422);
+        }
+        if ($default && $modes && ! in_array($default, $modes)) {
+            return response()->json(['message' => 'Default pricing mode must be in allowed modes'], 422);
+        }
+        if ($margin !== null && ($margin < 0 || $margin > 100)) {
+            return response()->json(['message' => 'Minimum margin percent must be between 0 and 100'], 422);
+        }
+        return null;
+    }
+
+    private function variantsBundlesError(?array $caps): ?JsonResponse
+    {
+        if (! empty($caps['variants']) && ! empty($caps['bundles'])) {
+            return response()->json(['message' => 'Variants and bundles cannot both be enabled'], 422);
+        }
+        return null;
+    }
+
+    private function serialDecimalsError(?array $caps): ?JsonResponse
+    {
+        if (! empty($caps['serial_numbers']) && ! empty($caps['decimal_quantities'])) {
+            return response()->json(['message' => 'Serial numbers and decimal quantities cannot both be enabled'], 422);
+        }
+        return null;
     }
 
     /**
@@ -76,56 +138,14 @@ class BlueprintController extends Controller
             'pricing_policy' => 'nullable|array',
             'unit_policy' => 'nullable|array',
             'layout' => 'nullable|array',
-            'fields' => 'nullable|array|max:60',
-            'fields.*.key' => ['required', 'alpha_dash', 'max:60', 'distinct'],
-            'fields.*.label' => 'required|string|max:100',
-            'fields.*.type' => ['required', Rule::in(['text', 'textarea', 'number', 'decimal', 'select', 'multi_select', 'checkbox', 'date', 'boolean', 'json'])],
-            'fields.*.options' => 'nullable|array|max:100',
-            'fields.*.validation' => 'nullable|array',
-            'fields.*.section' => 'nullable|string|max:50',
-            'fields.*.sort_order' => 'nullable|integer|min:0',
-            'fields.*.required' => 'nullable|boolean',
-            'fields.*.show_in_list' => 'nullable|boolean',
-            'fields.*.show_in_pos' => 'nullable|boolean',
-            'fields.*.show_on_label' => 'nullable|boolean',
-            'fields.*.is_variant_axis' => 'nullable|boolean',
-            'fields.*.is_filterable' => 'nullable|boolean',
-            'fields.*.is_searchable' => 'nullable|boolean',
-            'fields.*.hidden' => 'nullable|boolean',
-        ]);
+        ] + $this->fieldRules());
 
-        // Validate pricing policy
-        if (!empty($data['pricing_policy'])) {
-            $allowedModes = $data['pricing_policy']['allowed_modes'] ?? [];
-            $defaultMode = $data['pricing_policy']['default_mode'] ?? null;
-            $minMargin = $data['pricing_policy']['min_margin_percent'] ?? null;
-
-            if (!empty($allowedModes)) {
-                $validModes = ['fixed', 'negotiable', 'price_range', 'wholesale'];
-                foreach ($allowedModes as $mode) {
-                    if (!in_array($mode, $validModes)) {
-                        return response()->json([
-                            'message' => "Invalid pricing mode: {$mode}",
-                        ], 422);
-                    }
-                }
-            }
-
-            if ($defaultMode && !empty($allowedModes) && !in_array($defaultMode, $allowedModes)) {
-                return response()->json([
-                    'message' => 'Default pricing mode must be in allowed modes',
-                ], 422);
-            }
-
-            if ($minMargin !== null && ($minMargin < 0 || $minMargin > 100)) {
-                return response()->json([
-                    'message' => 'Minimum margin percent must be between 0 and 100',
-                ], 422);
-            }
-        }
+        if ($err = $this->pricingPolicyError($data['pricing_policy'] ?? null)) return $err;
+        if ($err = $this->variantsBundlesError($data['capabilities'] ?? null)) return $err;
+        if ($err = $this->serialDecimalsError($data['capabilities'] ?? null)) return $err;
 
         $blueprint = DB::transaction(function () use ($data, $shop) {
-            $blueprint = Blueprint::create([
+            $bp = Blueprint::create([
                 'shop_owner_id' => $shop->id,
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
@@ -136,43 +156,14 @@ class BlueprintController extends Controller
                 'pricing_policy' => $data['pricing_policy'] ?? [],
                 'unit_policy' => $data['unit_policy'] ?? [],
                 'layout' => $data['layout'] ?? [],
+                'system_fields' => ProductSystemFields::sanitize($data['system_fields'] ?? null),
                 'version' => 1,
             ]);
 
-            // Create fields if provided - reuse field definitions by key
-            if (!empty($data['fields'])) {
-                foreach ($data['fields'] as $fieldData) {
-                    $fieldDef = FieldDefinition::firstOrCreate(
-                        [
-                            'shop_owner_id' => $shop->id,
-                            'key' => $fieldData['key'],
-                        ],
-                        [
-                            'label' => $fieldData['label'],
-                            'type' => $fieldData['type'],
-                            'options' => $fieldData['options'] ?? null,
-                            'validation' => $fieldData['validation'] ?? null,
-                        ]
-                    );
-
-                    BlueprintField::create([
-                        'blueprint_id' => $blueprint->id,
-                        'field_definition_id' => $fieldDef->id,
-                        'section' => $fieldData['section'] ?? 'details',
-                        'sort_order' => $fieldData['sort_order'] ?? 0,
-                        'required' => $fieldData['required'] ?? false,
-                        'show_in_list' => $fieldData['show_in_list'] ?? false,
-                        'show_in_pos' => $fieldData['show_in_pos'] ?? false,
-                        'show_on_label' => $fieldData['show_on_label'] ?? false,
-                        'is_variant_axis' => $fieldData['is_variant_axis'] ?? false,
-                        'is_filterable' => $fieldData['is_filterable'] ?? false,
-                        'is_searchable' => $fieldData['is_searchable'] ?? false,
-                        'hidden' => $fieldData['hidden'] ?? false,
-                    ]);
-                }
+            if (! empty($data['fields'])) {
+                $this->presetService->syncFields($bp, $shop, $data['fields']);
             }
-
-            return $blueprint;
+            return $bp;
         });
 
         return response()->json([
@@ -199,8 +190,13 @@ class BlueprintController extends Controller
             'capabilities' => 'sometimes|array',
             'pricing_policy' => 'sometimes|array',
             'unit_policy' => 'sometimes|array',
+            'layout' => 'sometimes|array',
             'make_default' => 'sometimes|boolean',
-        ]);
+        ] + $this->fieldRules());
+
+        if ($err = $this->pricingPolicyError($data['pricing_policy'] ?? null)) return $err;
+        if ($err = $this->variantsBundlesError($data['capabilities'] ?? null)) return $err;
+        if ($err = $this->serialDecimalsError(array_merge($blueprint->capabilities ?? [], $data['capabilities'] ?? []))) return $err;
 
         // Prevent archiving the default blueprint
         if (isset($data['status']) && $data['status'] === 'archived' && $blueprint->is_default) {
@@ -220,27 +216,34 @@ class BlueprintController extends Controller
             unset($data['make_default']);
         }
 
-        // Bump version if capabilities, policies, or layout change
-        $shouldBumpVersion = false;
-        if (isset($data['capabilities']) && $data['capabilities'] !== $blueprint->capabilities) {
-            $shouldBumpVersion = true;
-        }
-        if (isset($data['pricing_policy']) && $data['pricing_policy'] !== $blueprint->pricing_policy) {
-            $shouldBumpVersion = true;
-        }
-        if (isset($data['unit_policy']) && $data['unit_policy'] !== $blueprint->unit_policy) {
-            $shouldBumpVersion = true;
+        $fields = $data['fields'] ?? null;
+        unset($data['fields']);
+
+        $bump = false;
+
+        // Sanitize system_fields and flag for version bump if changed.
+        if (array_key_exists('system_fields', $data)) {
+            $sanitized = ProductSystemFields::sanitize($data['system_fields']);
+            if ($sanitized != ($blueprint->system_fields ?? [])) $bump = true;
+            $data['system_fields'] = $sanitized;
         }
 
-        $blueprint->update($data);
-
-        if ($shouldBumpVersion) {
-            $blueprint->increment('version');
+        foreach (['capabilities', 'pricing_policy', 'unit_policy'] as $k) {
+            if (isset($data[$k]) && $data[$k] != $blueprint->$k) $bump = true;   // loose != on purpose
         }
+
+        DB::transaction(function () use ($blueprint, $data, $fields, $shop, &$bump) {
+            $blueprint->update($data);
+            if ($fields !== null && $this->presetService->syncFields($blueprint, $shop, $fields)) {
+                $bump = true;
+            }
+        });
+
+        if ($bump) $blueprint->increment('version');
 
         return response()->json([
             'message' => 'Blueprint updated.',
-            'blueprint' => $blueprint->fresh(),
+            'blueprint' => $blueprint->fresh()->load('fields.fieldDefinition'),
         ]);
     }
 
@@ -340,6 +343,7 @@ class BlueprintController extends Controller
     {
         return response()->json([
             'presets' => $this->presetService->getAvailablePresets(),
+            'system_fields' => array_values(ProductSystemFields::resolve(new Blueprint)),
         ]);
     }
 

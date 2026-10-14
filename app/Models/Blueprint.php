@@ -28,9 +28,8 @@ class Blueprint extends Model
         'capabilities',
         'pricing_policy',
         'unit_policy',
-        'default_base_unit_id',
-        'allowed_unit_ids',
         'layout',
+        'system_fields',
         'version',
     ];
 
@@ -39,8 +38,8 @@ class Blueprint extends Model
         'capabilities' => 'array',
         'pricing_policy' => 'array',
         'unit_policy' => 'array',
-        'allowed_unit_ids' => 'array',
         'layout' => 'array',
+        'system_fields' => 'array',
     ];
 
     public function shopOwner(): BelongsTo

@@ -11,6 +11,7 @@ use App\Services\BundleService;
 use App\Services\InventoryMovementService;
 use App\Services\ProductActivityLogger;
 use App\Services\ProductStockService;
+use App\Services\ProductSystemFields;
 use App\Services\ProductVariantService;
 use App\Services\QrCodeGenerator;
 use App\Services\UnitConversionService;
@@ -114,51 +115,54 @@ class ProductController extends Controller
         $policy = $blueprint->pricing_policy ?? [];
         $caps = $blueprint->capabilities ?? [];
 
-        $data = $request->validate(array_merge([
-            'name' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'internal_notes' => 'nullable|string',
-            'category_id' => ['nullable', Rule::exists('categories', 'id')->where('shop_owner_id', $shop->id)],
-            'brand_id' => ['nullable', Rule::exists('brands', 'id')->where('shop_owner_id', $shop->id)],
-            'branch_id' => ['nullable', Rule::exists('branches', 'id')->where('shop_owner_id', $shop->id)],
-            'image' => 'nullable|image|max:2048',
-            'status' => 'nullable|in:active,inactive',
-            'product_type' => 'nullable|in:neutral,variant,bundle',
-            'blueprint_id' => 'nullable|integer',
-            'scanned_barcode' => ['nullable', 'string', 'max:64',
-                Rule::unique('product_barcodes', 'barcode')->where('shop_owner_id', $shop->id)],
+        $data = $request->validate(array_merge(
+            $this->fieldRules->applySystemFields($blueprint, [
+                'name' => 'required|string|max:255',
+                'description' => 'nullable|string',
+                'internal_notes' => 'nullable|string',
+                'category_id' => ['nullable', Rule::exists('categories', 'id')->where('shop_owner_id', $shop->id)],
+                'brand_id' => ['nullable', Rule::exists('brands', 'id')->where('shop_owner_id', $shop->id)],
+                'branch_id' => ['nullable', Rule::exists('branches', 'id')->where('shop_owner_id', $shop->id)],
+                'image' => 'nullable|image|max:2048',
+                'status' => 'nullable|in:active,inactive',
+                'product_type' => 'nullable|in:neutral,variant,bundle',
+                'blueprint_id' => 'nullable|integer',
+                'scanned_barcode' => ['nullable', 'string', 'max:64',
+                    Rule::unique('product_barcodes', 'barcode')->where('shop_owner_id', $shop->id)],
 
-            'pricing_mode' => ['nullable', Rule::in($this->allowedModes($policy))],
-            'cost_price' => [($policy['cost_required'] ?? false) && $request->input('product_type') !== 'bundle' ? 'required' : 'nullable', 'numeric', 'min:0'],
-            'selling_price' => 'required|numeric|min:0',
-            'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
-            'min_price' => 'nullable|numeric|min:0',
-            'min_stock' => 'nullable|numeric|min:0',
+                'pricing_mode' => ['nullable', Rule::in($this->allowedModes($policy))],
+                'cost_price' => [($policy['cost_required'] ?? false) && $request->input('product_type') !== 'bundle' ? 'required' : 'nullable', 'numeric', 'min:0'],
+                'selling_price' => 'required|numeric|min:0',
+                'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
+                'min_price' => 'nullable|numeric|min:0',
+                'min_stock' => 'nullable|numeric|min:0',
 
-            'unit_id' => 'required|exists:units,id',
-            'conversion_factor' => 'nullable|numeric', // accepted from old clients; the base unit is always 1
-            'opening_stock' => 'nullable|numeric|min:0',
+                'unit_id' => 'required|exists:units,id',
+                'conversion_factor' => 'nullable|numeric', // accepted from old clients; the base unit is always 1
+                'opening_stock' => 'nullable|numeric|min:0',
 
-            'wholesale_tiers' => 'nullable|array',
-            'wholesale_tiers.*.min_quantity' => 'required_with:wholesale_tiers|numeric|min:0',
-            'wholesale_tiers.*.max_quantity' => 'nullable|numeric',
-            'wholesale_tiers.*.price' => 'required_with:wholesale_tiers|numeric|min:0',
+                'wholesale_tiers' => 'nullable|array',
+                'wholesale_tiers.*.min_quantity' => 'required_with:wholesale_tiers|numeric|min:0',
+                'wholesale_tiers.*.max_quantity' => 'nullable|numeric',
+                'wholesale_tiers.*.price' => 'required_with:wholesale_tiers|numeric|min:0',
 
-            'bundle_price' => 'nullable|numeric|min:0|required_if:product_type,bundle',
-            'bundle_items' => 'nullable|array|required_if:product_type,bundle',
-            'bundle_items.*.component_product_id' => 'required_with:bundle_items|integer',
-            'bundle_items.*.component_variant_id' => 'nullable|integer',
-            'bundle_items.*.unit_id' => 'required_with:bundle_items|integer',
-            'bundle_items.*.quantity' => ['required_with:bundle_items', 'regex:/^\d{1,11}(\.\d{1,4})?$/'],
+                'bundle_price' => 'nullable|numeric|min:0|required_if:product_type,bundle',
+                'bundle_items' => 'nullable|array|required_if:product_type,bundle',
+                'bundle_items.*.component_product_id' => 'required_with:bundle_items|integer',
+                'bundle_items.*.component_variant_id' => 'nullable|integer',
+                'bundle_items.*.unit_id' => 'required_with:bundle_items|integer',
+                'bundle_items.*.quantity' => ['required_with:bundle_items', 'regex:/^\d{1,11}(\.\d{1,4})?$/'],
 
-            'variants' => 'nullable|array|max:200',
-            'variants.*.attributes' => 'required_with:variants|array',
-            'variants.*.sku' => ['nullable', 'regex:/^[A-Za-z0-9._-]{1,60}$/'],
-            'variants.*.selling_price' => 'nullable|numeric|min:0',
-            'variants.*.purchase_price' => 'nullable|numeric|min:0',
-            'variants.*.barcode' => 'nullable|string|max:64',
-            'variants.*.opening_stock' => 'nullable|numeric|min:0',
-        ], $this->fieldRules->customFieldRules($blueprint)));
+                'variants' => 'nullable|array|max:200',
+                'variants.*.attributes' => 'required_with:variants|array',
+                'variants.*.sku' => ['nullable', 'regex:/^[A-Za-z0-9._-]{1,60}$/'],
+                'variants.*.selling_price' => 'nullable|numeric|min:0',
+                'variants.*.purchase_price' => 'nullable|numeric|min:0',
+                'variants.*.barcode' => 'nullable|string|max:64',
+                'variants.*.opening_stock' => 'nullable|numeric|min:0',
+            ], skipRequired: $request->input('product_type') === 'bundle' ? array_keys(ProductSystemFields::FIELDS) : []),
+            $this->fieldRules->customFieldRules($blueprint, partial: false, relaxRequired: $request->input('product_type') === 'bundle')
+        ));
 
         $this->fieldRules->assertKnownKeys($blueprint, $data['custom_fields'] ?? []);
 
@@ -171,6 +175,9 @@ class ProductController extends Controller
         if (! empty($data['opening_stock'])) {
             abort_if($type !== 'neutral', 422, 'Set opening stock on each variant, or sell bundles from their components.');
             abort_if(! $decimals && floor((float) $data['opening_stock']) != (float) $data['opening_stock'], 422, 'This product type only allows whole quantities.');
+        }
+        if (! empty($data['min_stock'])) {
+            abort_if(! $decimals && floor((float) $data['min_stock']) != (float) $data['min_stock'], 422, 'This product type only allows whole quantities.');
         }
 
         $bundleRows = $type === 'bundle'
@@ -207,7 +214,7 @@ class ProductController extends Controller
                 'updated_by' => $user->id,
             ]);
 
-            if ($request->hasFile('image')) {
+            if (! (ProductSystemFields::resolve($blueprint)['image']['hidden'] ?? false) && $request->hasFile('image')) {
                 $product->update(['image_path' => $request->file('image')->store('products', 'public')]);
             }
 
@@ -287,29 +294,39 @@ class ProductController extends Controller
         $blueprint = $product->blueprint ?? $this->blueprintFor($request, $shop, useDefault: true);
         $policy = $blueprint->pricing_policy ?? [];
 
-        $data = $request->validate(array_merge([
-            'name' => 'sometimes|string|max:255',
-            'description' => 'nullable|string',
-            'internal_notes' => 'nullable|string',
-            'category_id' => ['nullable', Rule::exists('categories', 'id')->where('shop_owner_id', $shop->id)],
-            'brand_id' => ['nullable', Rule::exists('brands', 'id')->where('shop_owner_id', $shop->id)],
-            'image' => 'nullable|image|max:2048',
-            'remove_image' => 'sometimes|boolean',
-            'status' => 'sometimes|in:active,inactive',
-            // a mode removed from the blueprint later stays valid for products already using it
-            'pricing_mode' => ['sometimes', Rule::in(array_merge($this->allowedModes($policy), [$product->pricing_mode]))],
-            'cost_price' => ['sometimes', ($policy['cost_required'] ?? false) ? 'required' : 'nullable', 'numeric', 'min:0'],
-            'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
-            'min_price' => 'nullable|numeric|min:0',
-            'min_stock' => 'nullable|numeric|min:0',
-            'selling_price' => 'nullable|numeric|min:0',
-            'conversion_factor' => 'nullable|numeric', // ignored: the base unit is always 1
-            'unit_id' => 'nullable|exists:units,id',
-            'current_stock' => 'nullable|numeric|min:0',
-            'opening_stock' => 'nullable|numeric|min:0',
-        ], $this->fieldRules->customFieldRules($blueprint, partial: true)));
+        $data = $request->validate(array_merge(
+            $this->fieldRules->applySystemFields($blueprint, [
+                'name' => 'sometimes|string|max:255',
+                'description' => 'nullable|string',
+                'internal_notes' => 'nullable|string',
+                'category_id' => ['nullable', Rule::exists('categories', 'id')->where('shop_owner_id', $shop->id)],
+                'brand_id' => ['nullable', Rule::exists('brands', 'id')->where('shop_owner_id', $shop->id)],
+                'image' => 'nullable|image|max:2048',
+                'remove_image' => 'sometimes|boolean',
+                'status' => 'sometimes|in:active,inactive',
+                // a mode removed from the blueprint later stays valid for products already using it
+                'pricing_mode' => ['sometimes', Rule::in(array_merge($this->allowedModes($policy), [$product->pricing_mode]))],
+                'cost_price' => ['sometimes', ($policy['cost_required'] ?? false) ? 'required' : 'nullable', 'numeric', 'min:0'],
+                'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
+                'min_price' => 'nullable|numeric|min:0',
+                'min_stock' => 'nullable|numeric|min:0',
+                'selling_price' => 'nullable|numeric|min:0',
+                'conversion_factor' => 'nullable|numeric', // ignored: the base unit is always 1
+                'unit_id' => 'nullable|exists:units,id',
+                'current_stock' => 'nullable|numeric|min:0',
+                'opening_stock' => 'nullable|numeric|min:0',
+            ], partial: true),
+            $this->fieldRules->customFieldRules($blueprint, partial: true, relaxRequired: $product->product_type === 'bundle')
+        ));
 
         $this->fieldRules->assertKnownKeys($blueprint, $data['custom_fields'] ?? []);
+
+        abort_if(
+            $request->boolean('remove_image')
+                && ! empty(ProductSystemFields::resolve($blueprint)['image']['required']),
+            422,
+            'An image is required for this product type.'
+        );
 
         $sellingPrice = $data['selling_price'] ?? null;
         $catalogUnitId = $data['unit_id'] ?? null;
@@ -322,10 +339,12 @@ class ProductController extends Controller
             'Stock for this product comes from its variants or components. Change it there.'
         );
 
-        if ($request->hasFile('image')) {
+        $imageHidden = ProductSystemFields::resolve($blueprint)['image']['hidden'] ?? false;
+
+        if (! $imageHidden && $request->hasFile('image')) {
             if ($product->image_path) Storage::disk('public')->delete($product->image_path);
             $data['image_path'] = $request->file('image')->store('products', 'public');
-        } elseif ($request->boolean('remove_image') && $product->image_path) {
+        } elseif (! $imageHidden && $request->boolean('remove_image') && $product->image_path) {
             Storage::disk('public')->delete($product->image_path);
             $data['image_path'] = null;
         }
@@ -338,6 +357,9 @@ class ProductController extends Controller
               $data['current_stock'], $data['opening_stock'], $data['remove_image'], $data['image']);
 
         $decimals = (bool) (($blueprint->capabilities ?? [])['decimal_quantities'] ?? false);
+        if (! empty($data['min_stock'])) {
+            abort_if(! $decimals && floor((float) $data['min_stock']) != (float) $data['min_stock'], 422, 'This product type only allows whole quantities.');
+        }
 
         DB::transaction(function () use ($request, $product, $data, $sellingPrice, $catalogUnitId, $desiredStock, $decimals) {
             $user = $request->user();

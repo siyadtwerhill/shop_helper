@@ -16,6 +16,16 @@ return new class extends Migration {
             $t->unique(['shop_owner_id', 'prefix']);
         });
 
+        // Drop the global SKU unique constraint and replace with shop-scoped
+        $indexes = collect(Schema::getIndexes('products'))->pluck('name');
+        if ($indexes->contains('products_sku_unique')) {
+            Schema::table('products', fn (Blueprint $t) => $t->dropUnique('products_sku_unique'));
+        }
+
+        Schema::table('products', function (Blueprint $t) {
+            $t->unique(['shop_owner_id', 'sku']);
+        });
+
         // Seed each counter from the highest existing number, archived (soft-deleted) rows included.
         $max = [];
         DB::table('products')->select('id', 'shop_owner_id', 'sku')->whereNotNull('sku')->orderBy('id')
@@ -38,5 +48,11 @@ return new class extends Migration {
     public function down(): void
     {
         Schema::dropIfExists('sku_counters');
+
+        // Restore the global SKU unique constraint
+        Schema::table('products', function (Blueprint $t) {
+            $t->dropUnique(['shop_owner_id', 'sku']);
+            $t->unique('sku');
+        });
     }
 };

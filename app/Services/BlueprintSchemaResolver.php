@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Blueprint;
 use App\Models\BlueprintField;
+use App\Services\ProductSystemFields;
 use Illuminate\Support\Collection;
 
 class BlueprintSchemaResolver
@@ -66,6 +67,7 @@ class BlueprintSchemaResolver
             'unit_policy'    => $blueprint->unit_policy ?? [],
             'sections'       => $sections,
             'axes'           => $axes,
+            'system_fields'  => ProductSystemFields::resolve($blueprint),
         ];
     }
 
@@ -120,6 +122,7 @@ class BlueprintSchemaResolver
 
         $sectionOrder = [
             'details' => 'Product Details',
+            'variant_axes' => 'Variant Axes',
             'pricing' => 'Pricing',
             'inventory' => 'Inventory',
             'attributes' => 'Attributes',
@@ -143,7 +146,7 @@ class BlueprintSchemaResolver
             if (!isset($sectionOrder[$key])) {
                 $sections[] = [
                     'key' => $key,
-                    'label' => ucfirst($key),
+                    'label' => ucwords(str_replace('_', ' ', $key)),
                     'fields' => $this->formatFields($sectionFields),
                 ];
             }

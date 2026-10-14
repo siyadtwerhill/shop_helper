@@ -218,9 +218,14 @@ class ProductVariantService
 
         if ($product->stock_mode === 'own') {
             abort_if(
-                $product->inventoryMovements()->exists(),
+                SaleItem::where('product_id', $product->id)->exists(),
                 422,
-                "This product already has stock history, so it can't become a variant product. Create a new variant product instead."
+                "This product has already been sold as a single item, so it can't become a variant product."
+            );
+            abort_if(
+                \App\Models\ProductBundleItem::where('component_product_id', $product->id)->exists(),
+                422,
+                "This product is used in a bundle, so it can't become a variant product."
             );
             $product->forceFill(['product_type' => 'variant', 'stock_mode' => 'from_variants'])->save();
         }

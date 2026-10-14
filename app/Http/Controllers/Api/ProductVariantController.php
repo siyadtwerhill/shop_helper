@@ -69,10 +69,10 @@ class ProductVariantController extends Controller
 
         $result = $this->variants->createMany($product, [$data], $request->user()->id);
 
-        return response()->json(
-            $this->withStock(collect($result['created'])->load('barcodes'))->first(),
-            201
-        );
+        $variants = collect($result['created']);
+        $variants->each(fn ($variant) => $variant->load('barcodes'));
+
+        return response()->json($this->withStock($variants)->first(), 201);
     }
 
     /** The grid: many variants in one request, all or nothing. */
@@ -99,8 +99,11 @@ class ProductVariantController extends Controller
             (bool) ($data['skip_existing'] ?? false)
         );
 
+        $created = collect($result['created']);
+        $created->each(fn ($variant) => $variant->load('barcodes'));
+
         return response()->json([
-            'created' => $this->withStock(collect($result['created'])->load('barcodes')),
+            'created' => $this->withStock($created),
             'skipped' => $result['skipped'],
         ], 201);
     }
