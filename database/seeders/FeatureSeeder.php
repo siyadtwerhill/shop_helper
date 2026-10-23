@@ -26,9 +26,19 @@ class FeatureSeeder extends Seeder
             ],
             'products' => [
                 ['name' => 'Product Management', 'slug' => 'products', 'sort_order' => 1],
+                ['name' => 'Product Variants', 'slug' => 'products.variants', 'sort_order' => 2],
+                ['name' => 'Product Units', 'slug' => 'products.units', 'sort_order' => 3],
+                ['name' => 'Product Bundles', 'slug' => 'products.bundles', 'sort_order' => 4],
+                ['name' => 'Product Pricing', 'slug' => 'products.pricing', 'sort_order' => 5],
+                ['name' => 'Inventory Stock', 'slug' => 'inventory.stock', 'sort_order' => 6],
             ],
             'sales' => [
                 ['name' => 'Sales Management', 'slug' => 'sales', 'sort_order' => 1],
+                ['name' => 'POS Operations', 'slug' => 'sales.pos', 'sort_order' => 2],
+                ['name' => 'Sales Voids & Refunds', 'slug' => 'sales.refunds', 'sort_order' => 3],
+            ],
+            'customers' => [
+                ['name' => 'Customer Management', 'slug' => 'customers', 'sort_order' => 1],
             ],
             'expenses' => [
                 ['name' => 'Expense Management', 'slug' => 'expenses', 'sort_order' => 1],

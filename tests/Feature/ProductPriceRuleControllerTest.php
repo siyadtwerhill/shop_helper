@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Product;
 use App\Models\ProductUnit;
+use App\Models\ShopOwner;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class ProductPriceRuleControllerTest extends TestCase
@@ -16,13 +18,19 @@ class ProductPriceRuleControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Permission::firstOrCreate(['name' => 'manage-price-rules', 'guard_name' => 'web']);
+        app(PermissionRegistrar::class)->setPermissionsTeamId(null);
+        Permission::firstOrCreate(['name' => 'products.pricing.create', 'guard_name' => 'web']);
     }
 
-    public function test_creating_a_price_rule_requires_manage_price_rules_permission(): void
+    public function test_creating_a_price_rule_requires_products_pricing_create_permission(): void
     {
-        $user = User::factory()->create(); // no permission granted
-        $product = Product::factory()->create();
+        $shopOwner = ShopOwner::factory()->create();
+        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
+        
+        $product = Product::factory()->for($shopOwner)->create();
         $unit = ProductUnit::factory()->forProduct($product)->base()->create();
 
         $this->actingAs($user)->postJson("/api/products/{$product->id}/price-rules", [
@@ -35,9 +43,14 @@ class ProductPriceRuleControllerTest extends TestCase
 
     public function test_user_with_permission_can_create_a_tier(): void
     {
-        $user = User::factory()->create();
-        $user->givePermissionTo('manage-price-rules');
-        $product = Product::factory()->create();
+        $shopOwner = ShopOwner::factory()->create();
+        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
+        $user->givePermissionTo('products.pricing.create');
+        
+        $product = Product::factory()->for($shopOwner)->create();
         $unit = ProductUnit::factory()->forProduct($product)->base()->create();
 
         $response = $this->actingAs($user)->postJson("/api/products/{$product->id}/price-rules", [

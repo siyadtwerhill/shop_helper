@@ -4,19 +4,36 @@ namespace Tests\Feature;
 
 use App\Models\Product;
 use App\Models\ProductUnit;
+use App\Models\ShopOwner;
 use App\Models\User;
 use App\Services\InventoryMovementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class InventoryMovementControllerTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        app(PermissionRegistrar::class)->setPermissionsTeamId(null);
+        Permission::firstOrCreate(['name' => 'inventory.stock.view', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'inventory.stock.edit', 'guard_name' => 'web']);
+    }
+
     public function test_activity_log_lists_movements_newest_first(): void
     {
-        $user = User::factory()->create();
-        $product = Product::factory()->create(['current_stock' => '0.0000']);
+        $shopOwner = ShopOwner::factory()->create();
+        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
+        $user->givePermissionTo('inventory.stock.view');
+        
+        $product = Product::factory()->for($shopOwner)->create(['current_stock' => '0.0000']);
         $unit = ProductUnit::factory()->for($product)->base()->create();
         app(InventoryMovementService::class)->purchase($product, $unit, 10);
         app(InventoryMovementService::class)->purchase($product, $unit, 5);
@@ -30,8 +47,14 @@ class InventoryMovementControllerTest extends TestCase
 
     public function test_manual_adjustment_endpoint_creates_a_movement_and_updates_stock(): void
     {
-        $user = User::factory()->create();
-        $product = Product::factory()->create(['current_stock' => '20.0000']);
+        $shopOwner = ShopOwner::factory()->create();
+        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
+        $user->givePermissionTo('inventory.stock.edit');
+        
+        $product = Product::factory()->for($shopOwner)->create(['current_stock' => '20.0000']);
         $unit = ProductUnit::factory()->for($product)->base()->create();
 
         $response = $this->actingAs($user)->postJson("/api/products/{$product->id}/movements", [

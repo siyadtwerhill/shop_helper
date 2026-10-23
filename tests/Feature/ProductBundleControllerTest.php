@@ -4,19 +4,37 @@ namespace Tests\Feature;
 
 use App\Models\Product;
 use App\Models\ProductUnit;
+use App\Models\ShopOwner;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class ProductBundleControllerTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Set team context to null for permission creation
+        app(PermissionRegistrar::class)->setPermissionsTeamId(null);
+        Permission::firstOrCreate(['name' => 'products.bundles.create', 'guard_name' => 'web']);
+    }
+
     public function test_creating_a_bundle_with_components(): void
     {
-        $user = User::factory()->create();
-        $bundleProduct = Product::factory()->create();
-        $coffee = Product::factory()->create();
+        $shopOwner = ShopOwner::factory()->create();
+        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        
+        // Set team context for this shop
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
+        $user->givePermissionTo('products.bundles.create');
+        
+        $bundleProduct = Product::factory()->for($shopOwner)->create();
+        $coffee = Product::factory()->for($shopOwner)->create();
         $coffeeUnit = ProductUnit::factory()->for($coffee)->base()->create();
 
         $response = $this->actingAs($user)->postJson("/api/products/{$bundleProduct->id}/bundle", [
@@ -33,9 +51,15 @@ class ProductBundleControllerTest extends TestCase
 
     public function test_a_product_cannot_be_turned_into_a_bundle_twice(): void
     {
-        $user = User::factory()->create();
-        $bundleProduct = Product::factory()->create();
-        $coffee = Product::factory()->create();
+        $shopOwner = ShopOwner::factory()->create();
+        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
+        $user->givePermissionTo('products.bundles.create');
+        
+        $bundleProduct = Product::factory()->for($shopOwner)->create();
+        $coffee = Product::factory()->for($shopOwner)->create();
         $coffeeUnit = ProductUnit::factory()->for($coffee)->base()->create();
 
         $payload = [
@@ -49,8 +73,14 @@ class ProductBundleControllerTest extends TestCase
 
     public function test_a_bundle_cannot_contain_itself_as_a_component(): void
     {
-        $user = User::factory()->create();
-        $bundleProduct = Product::factory()->create();
+        $shopOwner = ShopOwner::factory()->create();
+        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
+        $user->givePermissionTo('products.bundles.create');
+        
+        $bundleProduct = Product::factory()->for($shopOwner)->create();
         $unit = ProductUnit::factory()->for($bundleProduct)->base()->create();
 
         $this->actingAs($user)->postJson("/api/products/{$bundleProduct->id}/bundle", [

@@ -126,91 +126,122 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::middleware('can.perm:branches.delete')->delete('/branches/{branch}', [BranchController::class, 'destroy']);
 
     // ---- Products, Categories, Brands ----
-    Route::get('/products', [ProductController::class, 'index']);
-    Route::post('/products', [ProductController::class, 'store']);
-    Route::post('/products/lookup-barcode', [ProductController::class, 'lookupByBarcode']);
-    Route::get('/products/{product}', [ProductController::class, 'show']);
-    // POST is accepted so multipart FormData from the edit screen can be parsed
-    // (PHP does not populate files/input on a real PUT).
-    Route::match(['put', 'patch', 'post'], '/products/{product}', [ProductController::class, 'update']);
-    Route::delete('/products/{product}', [ProductController::class, 'destroy']);
-    Route::post('/products/{id}/restore', [ProductController::class, 'restore']);
+    Route::middleware('can.perm:products.view')->group(function () {
+        Route::get('/products', [ProductController::class, 'index']);
+        Route::get('/products/{product}', [ProductController::class, 'show']);
+        Route::post('/products/lookup-barcode', [ProductController::class, 'lookupByBarcode']);
+    });
+    Route::middleware('can.perm:products.create')->post('/products', [ProductController::class, 'store']);
+    Route::middleware('can.perm:products.edit')->group(function () {
+        // POST is accepted so multipart FormData from the edit screen can be parsed
+        // (PHP does not populate files/input on a real PUT).
+        Route::match(['put', 'patch', 'post'], '/products/{product}', [ProductController::class, 'update']);
+        Route::post('/products/{id}/restore', [ProductController::class, 'restore']);
+    });
+    Route::middleware('can.perm:products.delete')->delete('/products/{product}', [ProductController::class, 'destroy']);
 
     // ---- Blueprints ----
-    Route::get('/blueprints', [BlueprintController::class, 'index']);
-    Route::post('/blueprints', [BlueprintController::class, 'store']);
-    Route::get('/blueprints/presets', [BlueprintController::class, 'presets']);
-    Route::get('/blueprints/{blueprint}', [BlueprintController::class, 'show']);
-    Route::get('/blueprints/{blueprint}/schema', [BlueprintController::class, 'schema']);
-    Route::get('/blueprints/{blueprint}/form', [BlueprintController::class, 'form']);
-    Route::put('/blueprints/{blueprint}', [BlueprintController::class, 'update']);
-    Route::delete('/blueprints/{blueprint}', [BlueprintController::class, 'destroy']);
-    Route::post('/blueprints/{blueprint}/duplicate', [BlueprintController::class, 'duplicate']);
+    Route::middleware('can.perm:products.view')->group(function () {
+        Route::get('/blueprints', [BlueprintController::class, 'index']);
+        Route::get('/blueprints/presets', [BlueprintController::class, 'presets']);
+        Route::get('/blueprints/{blueprint}', [BlueprintController::class, 'show']);
+        Route::get('/blueprints/{blueprint}/schema', [BlueprintController::class, 'schema']);
+        Route::get('/blueprints/{blueprint}/form', [BlueprintController::class, 'form']);
+    });
+    Route::middleware('can.perm:products.create')->post('/blueprints', [BlueprintController::class, 'store']);
+    Route::middleware('can.perm:products.edit')->group(function () {
+        Route::put('/blueprints/{blueprint}', [BlueprintController::class, 'update']);
+        Route::post('/blueprints/{blueprint}/duplicate', [BlueprintController::class, 'duplicate']);
+    });
+    Route::middleware('can.perm:products.delete')->delete('/blueprints/{blueprint}', [BlueprintController::class, 'destroy']);
 
-    Route::apiResource('categories', CategoryController::class);
-    Route::apiResource('brands', BrandController::class);
+    Route::middleware('can.perm:products.view')->apiResource('categories', CategoryController::class)->only(['index', 'show']);
+    Route::middleware('can.perm:products.create')->apiResource('categories', CategoryController::class)->only(['store']);
+    Route::middleware('can.perm:products.edit')->apiResource('categories', CategoryController::class)->only(['update']);
+    Route::middleware('can.perm:products.delete')->apiResource('categories', CategoryController::class)->only(['destroy']);
+
+    Route::middleware('can.perm:products.view')->apiResource('brands', BrandController::class)->only(['index', 'show']);
+    Route::middleware('can.perm:products.create')->apiResource('brands', BrandController::class)->only(['store']);
+    Route::middleware('can.perm:products.edit')->apiResource('brands', BrandController::class)->only(['update']);
+    Route::middleware('can.perm:products.delete')->apiResource('brands', BrandController::class)->only(['destroy']);
 
     // ---- Units & Product Units ----
-    Route::apiResource('units', UnitController::class)->except(['show']);
+    Route::middleware('can.perm:products.units.view')->apiResource('units', UnitController::class)->except(['show']);
+    Route::middleware('can.perm:products.units.create')->apiResource('units', UnitController::class)->only(['store']);
+    Route::middleware('can.perm:products.units.edit')->apiResource('units', UnitController::class)->only(['update']);
+    Route::middleware('can.perm:products.units.delete')->apiResource('units', UnitController::class)->only(['destroy']);
 
-    Route::get('products/{product}/units', [ProductUnitController::class, 'index']);
-    Route::post('products/{product}/units', [ProductUnitController::class, 'store']);
-    Route::put('products/{product}/units/{productUnit}', [ProductUnitController::class, 'update']);
-    Route::delete('products/{product}/units/{productUnit}', [ProductUnitController::class, 'destroy']);
+    Route::middleware('can.perm:products.units.view')->get('products/{product}/units', [ProductUnitController::class, 'index']);
+    Route::middleware('can.perm:products.units.create')->post('products/{product}/units', [ProductUnitController::class, 'store']);
+    Route::middleware('can.perm:products.units.edit')->put('products/{product}/units/{productUnit}', [ProductUnitController::class, 'update']);
+    Route::middleware('can.perm:products.units.delete')->delete('products/{product}/units/{productUnit}', [ProductUnitController::class, 'destroy']);
 
     // ---- Inventory Movements & Scanner ----
-    Route::post('scanner/lookup', [ProductScannerController::class, 'lookup']);
+    Route::middleware('can.perm:products.view')->post('scanner/lookup', [ProductScannerController::class, 'lookup']);
 
-    Route::get('products/{product}/movements', [InventoryMovementController::class, 'index']);
-    Route::post('products/{product}/movements', [InventoryMovementController::class, 'store']);
+    Route::middleware('can.perm:inventory.stock.view')->get('products/{product}/movements', [InventoryMovementController::class, 'index']);
+    Route::middleware('can.perm:inventory.stock.edit')->post('products/{product}/movements', [InventoryMovementController::class, 'store']);
 
     // ---- Pricing ----
-    Route::post('pos/price-quote', [PriceQuoteController::class, 'store']);
+    Route::middleware('can.perm:products.pricing.view')->post('pos/price-quote', [PriceQuoteController::class, 'store']);
 
-    Route::get('products/{product}/price-rules', [ProductPriceRuleController::class, 'index']);
-    Route::post('products/{product}/price-rules', [ProductPriceRuleController::class, 'store']);
-    Route::put('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'update']);
-    Route::delete('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'destroy']);
+    Route::middleware('can.perm:products.pricing.view')->get('products/{product}/price-rules', [ProductPriceRuleController::class, 'index']);
+    Route::middleware('can.perm:products.pricing.create')->post('products/{product}/price-rules', [ProductPriceRuleController::class, 'store']);
+    Route::middleware('can.perm:products.pricing.edit')->put('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'update']);
+    Route::middleware('can.perm:products.pricing.delete')->delete('products/{product}/price-rules/{priceRule}', [ProductPriceRuleController::class, 'destroy']);
 
     // ---- Variants ----
-    Route::get('products/{product}/variants', [ProductVariantController::class, 'index']);
-    Route::get('products/{product}/variant-axes', [ProductVariantController::class, 'axes']);
-    Route::post('products/{product}/variants', [ProductVariantController::class, 'store']);
-    Route::post('products/{product}/variants/bulk', [ProductVariantController::class, 'bulk']);
-    Route::put('products/{product}/variants/{variant}', [ProductVariantController::class, 'update']);
-    Route::post('products/{product}/variants/{variant}/assign-stock', [ProductVariantController::class, 'assignStock']);
-    Route::delete('products/{product}/variants/{variant}', [ProductVariantController::class, 'destroy']);
+    Route::middleware('can.perm:products.variants.view')->group(function () {
+        Route::get('products/{product}/variants', [ProductVariantController::class, 'index']);
+        Route::get('products/{product}/variant-axes', [ProductVariantController::class, 'axes']);
+    });
+    Route::middleware('can.perm:products.variants.create')->group(function () {
+        Route::post('products/{product}/variants', [ProductVariantController::class, 'store']);
+        Route::post('products/{product}/variants/bulk', [ProductVariantController::class, 'bulk']);
+    });
+    Route::middleware('can.perm:products.variants.edit')->group(function () {
+        Route::put('products/{product}/variants/{variant}', [ProductVariantController::class, 'update']);
+        Route::post('products/{product}/variants/{variant}/assign-stock', [ProductVariantController::class, 'assignStock']);
+    });
+    Route::middleware('can.perm:products.variants.delete')->delete('products/{product}/variants/{variant}', [ProductVariantController::class, 'destroy']);
 
     // ---- Bundles ----
-    Route::get('products/{product}/bundle', [ProductBundleController::class, 'show']);
-    Route::post('products/{product}/bundle', [ProductBundleController::class, 'store']);
-    Route::put('products/{product}/bundle', [ProductBundleController::class, 'update']);
-    Route::delete('products/{product}/bundle', [ProductBundleController::class, 'destroy']);
+    Route::middleware('can.perm:products.bundles.view')->get('products/{product}/bundle', [ProductBundleController::class, 'show']);
+    Route::middleware('can.perm:products.bundles.create')->post('products/{product}/bundle', [ProductBundleController::class, 'store']);
+    Route::middleware('can.perm:products.bundles.edit')->put('products/{product}/bundle', [ProductBundleController::class, 'update']);
+    Route::middleware('can.perm:products.bundles.delete')->delete('products/{product}/bundle', [ProductBundleController::class, 'destroy']);
 
     // ---- Activity Logs ----
-    Route::get('products/{product}/activity', [ProductActivityLogController::class, 'index']);
+    Route::middleware('can.perm:products.view')->get('products/{product}/activity', [ProductActivityLogController::class, 'index']);
 
     // ---- Labels ----
-    Route::get('products/{product}/label', [ProductLabelController::class, 'show']);
-    Route::get('products/{product}/variants/{variant}/label', [ProductLabelController::class, 'variant']);
+    Route::middleware('can.perm:products.view')->group(function () {
+        Route::get('products/{product}/label', [ProductLabelController::class, 'show']);
+        Route::get('products/{product}/variants/{variant}/label', [ProductLabelController::class, 'variant']);
+    });
 
     // ---- Global Activity Feed ----
-    Route::get('activity', [ActivityFeedController::class, 'index']);
+    Route::middleware('can.perm:products.view')->get('activity', [ActivityFeedController::class, 'index']);
 
     // ---- All Bundles ----
-    Route::get('bundles', [BundleListController::class, 'index']);
+    Route::middleware('can.perm:products.bundles.view')->get('bundles', [BundleListController::class, 'index']);
 
     // ---- POS Sales ----
-    Route::post('pos/sales', [PosSaleController::class, 'store']);
+    Route::middleware('can.perm:sales.pos')->post('pos/sales', [PosSaleController::class, 'store']);
 
     // ---- Sales ----
-    Route::get('sales/overview', [SalesController::class, 'overview']);
-    Route::get('sales', [SalesController::class, 'index']);
-    Route::get('sales/{sale}', [SalesController::class, 'show']);
-    Route::post('sales/{sale}/void', [SalesController::class, 'void']);
+    Route::middleware('can.perm:sales.view')->group(function () {
+        Route::get('sales/overview', [SalesController::class, 'overview']);
+        Route::get('sales', [SalesController::class, 'index']);
+        Route::get('sales/{sale}', [SalesController::class, 'show']);
+    });
+    Route::middleware('can.perm:sales.refunds')->post('sales/{sale}/void', [SalesController::class, 'void']);
 
     // ---- Customers ----
-    Route::apiResource('customers', CustomerController::class);
+    Route::middleware('can.perm:customers.view')->apiResource('customers', CustomerController::class)->only(['index', 'show']);
+    Route::middleware('can.perm:customers.create')->apiResource('customers', CustomerController::class)->only(['store']);
+    Route::middleware('can.perm:customers.edit')->apiResource('customers', CustomerController::class)->only(['update']);
+    Route::middleware('can.perm:customers.delete')->apiResource('customers', CustomerController::class)->only(['destroy']);
 
     Route::middleware('superadmin')->group(function () {
         Route::post('/users', [UserController::class, 'store']);
