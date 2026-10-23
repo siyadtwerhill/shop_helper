@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Product;
 use App\Models\ProductUnit;
 use App\Models\ShopOwner;
+use App\Models\Staff;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -26,7 +27,7 @@ class ProductPriceRuleControllerTest extends TestCase
     {
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
-        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        $staff = Staff::factory()->for($shopOwner)->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         
@@ -45,7 +46,7 @@ class ProductPriceRuleControllerTest extends TestCase
     {
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
-        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        $staff = Staff::factory()->for($shopOwner)->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         $user->givePermissionTo('products.pricing.create');

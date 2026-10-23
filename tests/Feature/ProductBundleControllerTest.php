@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Product;
 use App\Models\ProductUnit;
 use App\Models\ShopOwner;
+use App\Models\Staff;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -27,7 +28,7 @@ class ProductBundleControllerTest extends TestCase
     {
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
-        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        $staff = Staff::factory()->for($shopOwner)->create(['user_id' => $user->id]);
         
         // Set team context for this shop
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
@@ -35,7 +36,7 @@ class ProductBundleControllerTest extends TestCase
         
         $bundleProduct = Product::factory()->for($shopOwner)->create();
         $coffee = Product::factory()->for($shopOwner)->create();
-        $coffeeUnit = ProductUnit::factory()->for($coffee)->base()->create();
+        $coffeeUnit = ProductUnit::factory()->forProduct($coffee)->base()->create();
 
         $response = $this->actingAs($user)->postJson("/api/products/{$bundleProduct->id}/bundle", [
             'bundle_price' => 7500,
@@ -53,14 +54,14 @@ class ProductBundleControllerTest extends TestCase
     {
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
-        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        $staff = Staff::factory()->for($shopOwner)->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         $user->givePermissionTo('products.bundles.create');
         
         $bundleProduct = Product::factory()->for($shopOwner)->create();
         $coffee = Product::factory()->for($shopOwner)->create();
-        $coffeeUnit = ProductUnit::factory()->for($coffee)->base()->create();
+        $coffeeUnit = ProductUnit::factory()->forProduct($coffee)->base()->create();
 
         $payload = [
             'bundle_price' => 7500,
@@ -75,7 +76,7 @@ class ProductBundleControllerTest extends TestCase
     {
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
-        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        $staff = Staff::factory()->for($shopOwner)->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         $user->givePermissionTo('products.bundles.create');

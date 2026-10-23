@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Product;
 use App\Models\ProductUnit;
 use App\Models\ShopOwner;
+use App\Models\Staff;
 use App\Models\User;
 use App\Services\InventoryMovementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -28,13 +29,13 @@ class InventoryMovementControllerTest extends TestCase
     {
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
-        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        $staff = Staff::factory()->for($shopOwner)->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         $user->givePermissionTo('inventory.stock.view');
         
         $product = Product::factory()->for($shopOwner)->create(['current_stock' => '0.0000']);
-        $unit = ProductUnit::factory()->for($product)->base()->create();
+        $unit = ProductUnit::factory()->forProduct($product)->base()->create();
         app(InventoryMovementService::class)->purchase($product, $unit, 10);
         app(InventoryMovementService::class)->purchase($product, $unit, 5);
 
@@ -49,7 +50,7 @@ class InventoryMovementControllerTest extends TestCase
     {
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
-        $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
+        $staff = Staff::factory()->for($shopOwner)->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         $user->givePermissionTo('inventory.stock.edit');
