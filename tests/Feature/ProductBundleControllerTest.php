@@ -29,6 +29,7 @@ class ProductBundleControllerTest extends TestCase
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
         $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
+        $user->setRelation('staff', $staff);
         
         // Set team context for this shop
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
@@ -55,6 +56,7 @@ class ProductBundleControllerTest extends TestCase
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
         $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
+        $user->setRelation('staff', $staff);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         $user->givePermissionTo('products.bundles.create');
@@ -77,6 +79,7 @@ class ProductBundleControllerTest extends TestCase
         $shopOwner = ShopOwner::factory()->create();
         $user = User::factory()->create(['role' => 'staff']);
         $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
+        $user->setRelation('staff', $staff);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
         $user->givePermissionTo('products.bundles.create');

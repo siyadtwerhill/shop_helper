@@ -24,7 +24,7 @@ class InventoryMovementController extends Controller
         $this->ownedProduct($request, $product);
 
         return $product->inventoryMovements()
-            ->with(['unit.unit', 'creator:id,name'])
+            ->with(['unit', 'creator:id,name'])
             ->when($request->filled('variant_id'), fn ($q) => $q->where('variant_id', $request->variant_id))
             ->latest('id')
             ->paginate(25);
@@ -66,6 +66,6 @@ class InventoryMovementController extends Controller
 
         $this->activity->log($product, 'stock_adjusted', $request->user()->id, description: "Stock adjusted by {$data['quantity']}");
 
-        return response()->json($movement->load('unit.unit'), 201);
+        return response()->json($movement->load('unit'), 201);
     }
 }
