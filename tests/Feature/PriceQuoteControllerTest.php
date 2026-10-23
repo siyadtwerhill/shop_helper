@@ -28,13 +28,10 @@ class PriceQuoteControllerTest extends TestCase
     public function test_quote_returns_422_with_a_message_when_margin_is_violated(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'staff']);
-        $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shopOwner->user()->associate($user);
+        $shopOwner->save();
         
-        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
-        $user->givePermissionTo('products.pricing.view');
-        $user->givePermissionTo('negotiate-price');
-
         $product = Product::factory()->for($shopOwner)->create([
             'pricing_mode' => PricingMode::Negotiable->value,
             'cost_price' => '4000.00',
@@ -56,11 +53,9 @@ class PriceQuoteControllerTest extends TestCase
     public function test_quote_returns_the_resolved_price_for_a_valid_wholesale_request(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'staff']);
-        $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
-        
-        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
-        $user->givePermissionTo('products.pricing.view');
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shopOwner->user()->associate($user);
+        $shopOwner->save();
         
         $product = Product::factory()->for($shopOwner)->create(['pricing_mode' => PricingMode::Wholesale->value]);
         $unit = ProductUnit::factory()->forProduct($product)->base()->create(['selling_price' => '5000.00']);

@@ -28,12 +28,9 @@ class InventoryMovementControllerTest extends TestCase
     public function test_activity_log_lists_movements_newest_first(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'staff']);
-        $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
-        $user->setRelation('staff', $staff);
-        
-        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
-        $user->givePermissionTo('inventory.stock.view');
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shopOwner->user()->associate($user);
+        $shopOwner->save();
         
         $product = Product::factory()->for($shopOwner)->create(['current_stock' => '0.0000']);
         $unit = ProductUnit::factory()->forProduct($product)->base()->create();
@@ -50,12 +47,9 @@ class InventoryMovementControllerTest extends TestCase
     public function test_manual_adjustment_endpoint_creates_a_movement_and_updates_stock(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'staff']);
-        $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
-        $user->setRelation('staff', $staff);
-        
-        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
-        $user->givePermissionTo('inventory.stock.edit');
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shopOwner->user()->associate($user);
+        $shopOwner->save();
         
         $product = Product::factory()->for($shopOwner)->create(['current_stock' => '20.0000']);
         $unit = ProductUnit::factory()->for($product)->base()->create();

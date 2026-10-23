@@ -27,13 +27,9 @@ class ProductBundleControllerTest extends TestCase
     public function test_creating_a_bundle_with_components(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'staff']);
-        $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
-        $user->setRelation('staff', $staff);
-        
-        // Set team context for this shop
-        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
-        $user->givePermissionTo('products.bundles.create');
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shopOwner->user()->associate($user);
+        $shopOwner->save();
         
         $bundleProduct = Product::factory()->for($shopOwner)->create();
         $coffee = Product::factory()->for($shopOwner)->create();
@@ -54,12 +50,9 @@ class ProductBundleControllerTest extends TestCase
     public function test_a_product_cannot_be_turned_into_a_bundle_twice(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'staff']);
-        $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
-        $user->setRelation('staff', $staff);
-        
-        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
-        $user->givePermissionTo('products.bundles.create');
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shopOwner->user()->associate($user);
+        $shopOwner->save();
         
         $bundleProduct = Product::factory()->for($shopOwner)->create();
         $coffee = Product::factory()->for($shopOwner)->create();
@@ -77,12 +70,9 @@ class ProductBundleControllerTest extends TestCase
     public function test_a_bundle_cannot_contain_itself_as_a_component(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->create(['role' => 'staff']);
-        $staff = Staff::factory()->create(['user_id' => $user->id, 'shop_owner_id' => $shopOwner->id]);
-        $user->setRelation('staff', $staff);
-        
-        app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
-        $user->givePermissionTo('products.bundles.create');
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shopOwner->user()->associate($user);
+        $shopOwner->save();
         
         $bundleProduct = Product::factory()->for($shopOwner)->create();
         $unit = ProductUnit::factory()->for($bundleProduct)->base()->create();
