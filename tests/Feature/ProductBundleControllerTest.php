@@ -26,7 +26,7 @@ class ProductBundleControllerTest extends TestCase
     public function test_creating_a_bundle_with_components(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         // Set team context for this shop
@@ -52,7 +52,7 @@ class ProductBundleControllerTest extends TestCase
     public function test_a_product_cannot_be_turned_into_a_bundle_twice(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
@@ -74,7 +74,7 @@ class ProductBundleControllerTest extends TestCase
     public function test_a_bundle_cannot_contain_itself_as_a_component(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);

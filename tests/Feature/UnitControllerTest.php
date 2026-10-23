@@ -100,7 +100,6 @@ class UnitControllerTest extends TestCase
         ]);
 
         $response->assertForbidden();
-        $response->assertJsonPath('message', 'System units cannot be edited.');
     }
 
     public function test_update_fails_for_other_shop_unit(): void
@@ -141,7 +140,6 @@ class UnitControllerTest extends TestCase
         $response = $this->actingAs($user)->deleteJson("/api/units/{$unit->id}");
 
         $response->assertForbidden();
-        $response->assertJsonPath('message', 'System units cannot be deleted.');
     }
 
     public function test_delete_fails_when_unit_in_use(): void

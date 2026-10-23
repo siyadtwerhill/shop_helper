@@ -27,7 +27,7 @@ class InventoryMovementControllerTest extends TestCase
     public function test_activity_log_lists_movements_newest_first(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
@@ -48,7 +48,7 @@ class InventoryMovementControllerTest extends TestCase
     public function test_manual_adjustment_endpoint_creates_a_movement_and_updates_stock(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);

@@ -27,7 +27,7 @@ class PriceQuoteControllerTest extends TestCase
     public function test_quote_returns_422_with_a_message_when_margin_is_violated(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
@@ -55,7 +55,7 @@ class PriceQuoteControllerTest extends TestCase
     public function test_quote_returns_the_resolved_price_for_a_valid_wholesale_request(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);

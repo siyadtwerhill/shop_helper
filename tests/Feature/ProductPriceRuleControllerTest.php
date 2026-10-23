@@ -25,7 +25,7 @@ class ProductPriceRuleControllerTest extends TestCase
     public function test_creating_a_price_rule_requires_products_pricing_create_permission(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
@@ -44,7 +44,7 @@ class ProductPriceRuleControllerTest extends TestCase
     public function test_user_with_permission_can_create_a_tier(): void
     {
         $shopOwner = ShopOwner::factory()->create();
-        $user = User::factory()->for($shopOwner)->create(['role' => 'staff']);
+        $user = User::factory()->create(['role' => 'staff']);
         $staff = $shopOwner->staff()->create(['user_id' => $user->id]);
         
         app(PermissionRegistrar::class)->setPermissionsTeamId($shopOwner->id);
