@@ -134,6 +134,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // (PHP does not populate files/input on a real PUT).
     Route::match(['put', 'patch', 'post'], '/products/{product}', [ProductController::class, 'update']);
     Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+    Route::post('/products/{id}/restore', [ProductController::class, 'restore']);
 
     // ---- Blueprints ----
     Route::get('/blueprints', [BlueprintController::class, 'index']);

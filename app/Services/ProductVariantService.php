@@ -7,7 +7,6 @@ use App\Models\InventoryMovement;
 use App\Models\Product;
 use App\Models\ProductBarcode;
 use App\Models\ProductVariant;
-use App\Models\SaleItem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -217,11 +216,6 @@ class ProductVariantService
         abort_if($product->product_type === 'bundle' || $product->stock_mode === 'from_components', 422, "Bundles can't have variants.");
 
         if ($product->stock_mode === 'own') {
-            abort_if(
-                SaleItem::where('product_id', $product->id)->exists(),
-                422,
-                "This product has already been sold as a single item, so it can't become a variant product."
-            );
             abort_if(
                 \App\Models\ProductBundleItem::where('component_product_id', $product->id)->exists(),
                 422,

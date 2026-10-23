@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Blueprint;
 use App\Models\Product;
 use App\Models\ProductBarcode;
+use App\Models\Unit;
 use App\Services\BarcodeGenerator;
 use App\Services\BlueprintValidationBuilder;
 use App\Services\BundleService;
@@ -45,11 +46,15 @@ class ProductController extends Controller
         $user = $request->user();
 
         $query = Product::where('shop_owner_id', $shop->id)
-            ->with(['category:id,name', 'brand:id,name', 'barcodes', 'baseUnit.unit', 'branch:id,name', 'blueprint:id,name',
+            ->with(['category:id,name', 'brand:id,name', 'barcodes', 'baseUnit.unit', 'branch:id,name', 'blueprint:id,name,capabilities',
                     'bundle.items.unit', 'bundle.items.component:id,current_stock'])
             ->withCount('variants')
             ->withMin('variants', 'selling_price')
             ->withMax('variants', 'selling_price');
+
+        if ($request->input('status') === 'archived') {
+            $query->withTrashed();
+        }
 
         // Branch heads see their branch plus shop-wide products.
         if ($user->isBranchHead() && $user->staff?->branch_id) {
@@ -141,10 +146,10 @@ class ProductController extends Controller
                 'conversion_factor' => 'nullable|numeric', // accepted from old clients; the base unit is always 1
                 'opening_stock' => 'nullable|numeric|min:0',
 
-                'wholesale_tiers' => 'nullable|array',
-                'wholesale_tiers.*.min_quantity' => 'required_with:wholesale_tiers|numeric|min:0',
+                'wholesale_tiers' => ['required_if:pricing_mode,wholesale', 'array', 'min:1'],
+                'wholesale_tiers.*.min_quantity' => 'required|numeric|gt:0|distinct',
                 'wholesale_tiers.*.max_quantity' => 'nullable|numeric',
-                'wholesale_tiers.*.price' => 'required_with:wholesale_tiers|numeric|min:0',
+                'wholesale_tiers.*.price' => 'required|numeric|min:0',
 
                 'bundle_price' => 'nullable|numeric|min:0|required_if:product_type,bundle',
                 'bundle_items' => 'nullable|array|required_if:product_type,bundle',
@@ -169,6 +174,15 @@ class ProductController extends Controller
         $type = $data['product_type'] ?? 'neutral';
         abort_if($type === 'variant' && empty($caps['variants']), 422, 'This product type does not allow variants.');
         abort_if($type === 'bundle' && empty($caps['bundles']), 422, 'This product type does not allow bundles.');
+        if ($type === 'bundle') {
+            $bundleUnit = Unit::availableTo($shop->id)
+                ->where('type', 'quantity')
+                ->where(fn ($query) => $query->whereRaw('UPPER(symbol) = ?', ['DZ'])->orWhereRaw('LOWER(name) = ?', ['dozen']))
+                ->orderByDesc('is_system')
+                ->first();
+            abort_if(! $bundleUnit, 422, 'The DZ (Dozen) unit is not available for bundles.');
+            $data['unit_id'] = $bundleUnit->id;
+        }
         abort_if(! empty($data['variants']) && $type !== 'variant', 422, 'Variants can only be added to a variant product.');
 
         $decimals = (bool) ($caps['decimal_quantities'] ?? false);
@@ -205,7 +219,7 @@ class ProductController extends Controller
                 'blueprint_version' => $blueprint->version,
                 'stock_mode' => $this->stockModeFor($type),
                 'custom_fields' => $data['custom_fields'] ?? [],
-                'pricing_mode' => $data['pricing_mode'] ?? ($policy['default_mode'] ?? 'fixed'),
+                'pricing_mode' => $type === 'bundle' ? 'fixed' : ($data['pricing_mode'] ?? ($policy['default_mode'] ?? 'fixed')),
                 'cost_price' => $data['cost_price'] ?? null,
                 'min_margin_percent' => $data['min_margin_percent'] ?? ($policy['min_margin_percent'] ?? null),
                 'min_price' => $data['min_price'] ?? null,
@@ -305,7 +319,7 @@ class ProductController extends Controller
                 'remove_image' => 'sometimes|boolean',
                 'status' => 'sometimes|in:active,inactive',
                 // a mode removed from the blueprint later stays valid for products already using it
-                'pricing_mode' => ['sometimes', Rule::in(array_merge($this->allowedModes($policy), [$product->pricing_mode]))],
+                'pricing_mode' => ['sometimes', Rule::in($product->product_type === 'bundle' ? ['fixed'] : array_merge($this->allowedModes($policy), [$product->pricing_mode]))],
                 'cost_price' => ['sometimes', ($policy['cost_required'] ?? false) ? 'required' : 'nullable', 'numeric', 'min:0'],
                 'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
                 'min_price' => 'nullable|numeric|min:0',
@@ -321,6 +335,17 @@ class ProductController extends Controller
 
         $this->fieldRules->assertKnownKeys($blueprint, $data['custom_fields'] ?? []);
 
+        $bundleUnit = null;
+        if ($product->product_type === 'bundle') {
+            $bundleUnit = Unit::availableTo($shop->id)
+                ->where('type', 'quantity')
+                ->where(fn ($query) => $query->whereRaw('UPPER(symbol) = ?', ['DZ'])->orWhereRaw('LOWER(name) = ?', ['dozen']))
+                ->orderByDesc('is_system')
+                ->first();
+            abort_if(! $bundleUnit, 422, 'The DZ (Dozen) unit is not available for bundles.');
+            $data['pricing_mode'] = 'fixed';
+        }
+
         abort_if(
             $request->boolean('remove_image')
                 && ! empty(ProductSystemFields::resolve($blueprint)['image']['required']),
@@ -329,7 +354,7 @@ class ProductController extends Controller
         );
 
         $sellingPrice = $data['selling_price'] ?? null;
-        $catalogUnitId = $data['unit_id'] ?? null;
+        $catalogUnitId = $bundleUnit?->id ?? ($data['unit_id'] ?? null);
         $desiredStock = $data['current_stock'] ?? $data['opening_stock'] ?? null;
 
         abort_if(
@@ -445,6 +470,20 @@ class ProductController extends Controller
         $product->delete();
 
         return response()->json(['message' => 'Product archived.']);
+    }
+
+    public function restore(Request $request, int $id)
+    {
+        $product = Product::withTrashed()->findOrFail($id);
+        $this->ownedProduct($request, $product);
+        $this->authorizeAction($request, 'products.edit');
+
+        abort_if($product->status !== 'archived', 422, 'This product is not archived.');
+
+        $product->restore();
+        $product->update(['status' => 'active', 'updated_by' => $request->user()->id]);
+
+        return response()->json(['message' => 'Product restored.']);
     }
 
     public function lookupByBarcode(Request $request)

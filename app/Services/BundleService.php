@@ -10,6 +10,8 @@ use Illuminate\Validation\ValidationException;
 
 class BundleService
 {
+    public function __construct(private ProductStockService $stock) {}
+
     /**
      * Validates components against the shop and returns rows ready for product_bundle_items.
      * Pass $bundleProductId to block a bundle from containing itself.
@@ -30,7 +32,8 @@ class BundleService
             if ($component->status !== 'active') $this->fail("$f.component_product_id", "\"{$component->name}\" is inactive.");
             if ($component->stock_mode === 'from_components') $this->fail("$f.component_product_id", "\"{$component->name}\" is a bundle. Bundles can't contain bundles.");
 
-            if (! $component->units()->whereKey($item['unit_id'] ?? 0)->exists()) {
+            $unit = $component->units()->whereKey($item['unit_id'] ?? 0)->first();
+            if (! $unit) {
                 $this->fail("$f.unit_id", "That unit does not belong to \"{$component->name}\".");
             }
 
@@ -54,6 +57,14 @@ class BundleService
             }
             if (! $decimals && bccomp(bcmul($q, '1', 0), $q, 4) !== 0) {
                 $this->fail("$f.quantity", 'This product type only allows whole quantities.');
+            }
+
+            $have = $variantId
+                ? $this->stock->variantStock((int) $variantId)
+                : $this->stock->availableFor($component);
+            $needed = bcmul($q, (string) $unit->conversion_factor, 4);
+            if (bccomp($have, $needed, 4) < 0) {
+                $this->fail($f, "\"{$component->name}\" does not have enough stock to make one bundle.");
             }
 
             $rows[] = [

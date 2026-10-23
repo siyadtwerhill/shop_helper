@@ -22,5 +22,14 @@ class DatabaseSeeder extends Seeder
             ShopOwnerSeeder::class,
             PricingPermissionSeeder::class,
         ]);
+
+        // Uncomment the shop seeders you want to run
+        // $this->call([
+        //     SupermarketSeeder::class,
+        //     ClothingSeeder::class,
+        //     PharmacySeeder::class,
+        //     ElectronicsSeeder::class,
+        //     CafeSeeder::class,
+        // ]);
     }
 }

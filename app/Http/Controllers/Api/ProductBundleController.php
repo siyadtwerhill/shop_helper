@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\Unit;
 use App\Models\SaleItem;
 use App\Services\BundleService;
 use App\Services\ProductActivityLogger;
@@ -37,8 +38,9 @@ class ProductBundleController extends Controller
         abort_if($product->bundle()->exists(), 409, 'This product is already a bundle.');
 
         $data = $this->validated($request);
+        $bundleUnit = $this->bundleUnit($shop->id);
 
-        DB::transaction(function () use ($product, $data, $shop, $request) {
+        DB::transaction(function () use ($product, $data, $shop, $request, $bundleUnit) {
             $locked = Product::whereKey($product->id)->lockForUpdate()->firstOrFail();
             $caps   = $locked->blueprint?->capabilities ?? [];
             abort_if(empty($caps['bundles']), 422, 'This product type does not allow bundles.');
@@ -47,7 +49,11 @@ class ProductBundleController extends Controller
             $decimals = (bool) ($caps['decimal_quantities'] ?? true);
             $rows = $this->bundles->normalizeItems($shop->id, $data['items'], $decimals, $locked->id);
 
-            $locked->forceFill(['product_type' => 'bundle', 'stock_mode' => 'from_components'])->save();
+            $locked->forceFill(['product_type' => 'bundle', 'stock_mode' => 'from_components', 'pricing_mode' => 'fixed'])->save();
+            $locked->units()->where('is_base', true)->firstOrFail()->update([
+                'unit_id' => $bundleUnit->id,
+                'conversion_factor' => 1,
+            ]);
             $this->bundles->create($locked, (string) $data['bundle_price'], $rows);
             $this->activity->log($locked, 'bundle_created', $request->user()->id, description: count($rows) . ' components');
         });
@@ -64,8 +70,9 @@ class ProductBundleController extends Controller
         $bundle = $product->bundle()->firstOrFail();
 
         $data = $this->validated($request, itemsRequired: false);
+        $bundleUnit = $this->bundleUnit($shop->id);
 
-        DB::transaction(function () use ($product, $bundle, $data, $shop, $request) {
+        DB::transaction(function () use ($product, $bundle, $data, $shop, $request, $bundleUnit) {
             $locked   = Product::whereKey($product->id)->lockForUpdate()->firstOrFail();
             $decimals = (bool) (($locked->blueprint?->capabilities ?? [])['decimal_quantities'] ?? true);
 
@@ -74,6 +81,11 @@ class ProductBundleController extends Controller
                 : null;
 
             $this->bundles->replace($bundle, (string) $data['bundle_price'], $rows);
+            $locked->forceFill(['pricing_mode' => 'fixed'])->save();
+            $locked->units()->where('is_base', true)->firstOrFail()->update([
+                'unit_id' => $bundleUnit->id,
+                'conversion_factor' => 1,
+            ]);
             $this->activity->log($locked, 'bundle_updated', $request->user()->id);
         });
 
@@ -83,20 +95,22 @@ class ProductBundleController extends Controller
     public function destroy(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.delete');
         $bundle = $product->bundle()->firstOrFail();
 
         abort_if(
             SaleItem::where('product_id', $product->id)->exists(),
             422,
-            "This bundle has been sold, so it can't be removed. Mark it inactive instead."
+            "This bundle has been sold, so its product can't be removed. Mark it inactive instead."
         );
 
         DB::transaction(function () use ($product, $bundle, $request) {
             $bundle->items()->delete();
             $bundle->delete();
             $product->forceFill(['product_type' => 'neutral', 'stock_mode' => 'own'])->save();
-            $this->activity->log($product, 'bundle_removed', $request->user()->id);
+            $product->update(['status' => 'archived', 'updated_by' => $request->user()->id]);
+            $this->activity->log($product, 'archived', $request->user()->id);
+            $product->delete();
         });
 
         return response()->json(null, 204);
@@ -117,7 +131,7 @@ class ProductBundleController extends Controller
     private function payload(Product $product, int $status = 200)
     {
         $bundle = $product->bundle()->with([
-            'items.component:id,name,sku,status,stock_mode,cost_price',
+            'items.component:id,name,sku,status,stock_mode,cost_price,current_stock',
             'items.component.units.unit',
             'items.component.variants',
             'items.unit.unit',
@@ -126,10 +140,32 @@ class ProductBundleController extends Controller
 
         if (! $bundle) return response()->json(['bundle' => null]);
 
+        $components = $bundle->items->pluck('component')->filter();
+        $this->stock->hydrate($components);
+        $variantStocks = $this->stock->variantStocks(
+            $components->flatMap(fn ($component) => $component->variants->pluck('id'))->all()
+        );
+        foreach ($components as $component) {
+            foreach ($component->variants as $variant) {
+                $variant->setAttribute('current_stock', $variantStocks[$variant->id] ?? '0.0000');
+            }
+        }
+
         return response()->json([
             'bundle'          => $bundle,
             'summary'         => $this->bundles->summary($bundle),
             'available_stock' => $this->stock->bundleAvailableFor($bundle),
         ], $status);
+    }
+
+    private function bundleUnit(int $shopId): Unit
+    {
+        $unit = Unit::availableTo($shopId)
+            ->where('type', 'quantity')
+            ->where(fn ($query) => $query->whereRaw('UPPER(symbol) = ?', ['DZ'])->orWhereRaw('LOWER(name) = ?', ['dozen']))
+            ->orderByDesc('is_system')
+            ->first();
+        abort_if(! $unit, 422, 'The DZ (Dozen) unit is not available for bundles.');
+        return $unit;
     }
 }

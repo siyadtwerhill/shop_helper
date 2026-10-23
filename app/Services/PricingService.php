@@ -84,15 +84,12 @@ class PricingService
         return $price;
     }
 
-    /** Quantity-tiered pricing (e.g. 1–9, 10–49, 50+). Falls back to the unit's list price if no tier matches. */
+    /** Quantity-tiered pricing: the highest minimum quantity not exceeding the order quantity applies. */
     public function wholesaleTierPrice(Product $product, ProductUnit $productUnit, string $quantity): ?string
     {
         $rule = $product->priceRules()
             ->where('unit_id', $productUnit->id)
             ->where('min_quantity', '<=', $quantity)
-            ->where(function ($q) use ($quantity) {
-                $q->whereNull('max_quantity')->orWhere('max_quantity', '>=', $quantity);
-            })
             ->orderByDesc('min_quantity')
             ->first();
 
