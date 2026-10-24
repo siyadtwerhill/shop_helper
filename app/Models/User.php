@@ -40,12 +40,23 @@ class User extends Authenticatable
     }
 
     // A branch_head is still role = 'staff' at the User level — this
-    // checks the Spatie role assignment, not the `role` column, since
-    // "branch_head" is a role within a shop's team, not a top-level
-    // account type.
+    // checks both the Spatie role assignment and the branch.head_staff_id
+    // for consistency. "branch_head" is a role within a shop's team, not a
+    // top-level account type.
     public function isBranchHead(): bool
     {
-        return $this->isStaff() && $this->hasRole('branch_head');
+        if (!$this->isStaff()) {
+            return false;
+        }
+
+        // Check Spatie role first (with team context)
+        $hasRole = $this->hasRole('Branch Head');
+
+        // Also verify branch.head_staff_id matches this staff record
+        $matchesBranchHead = $this->staff && $this->staff->branch && $this->staff->branch->head_staff_id === $this->staff->id;
+
+        // Both should be true for consistency
+        return $hasRole && $matchesBranchHead;
     }
 
     public function shopOwner()

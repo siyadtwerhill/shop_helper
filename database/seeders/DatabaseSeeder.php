@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
             FeatureSeeder::class,
             ShopOwnerSeeder::class,
             PricingPermissionSeeder::class,
+            BranchHeadRoleSeeder::class,
         ]);
 
         // Uncomment the shop seeders you want to run

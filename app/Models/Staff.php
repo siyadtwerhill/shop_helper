@@ -45,7 +45,11 @@ class Staff extends Authenticatable
 
     public function isBranchHead(): bool
     {
-        return $this->branch && $this->branch->head_staff_id === $this->id;
+        // Check both branch.head_staff_id and Spatie role for consistency
+        $matchesBranchHead = $this->branch && $this->branch->head_staff_id === $this->id;
+        $hasRole = $this->user && $this->user->hasRole('Branch Head');
+        
+        return $matchesBranchHead && $hasRole;
     }
 
     public function isActive(): bool
