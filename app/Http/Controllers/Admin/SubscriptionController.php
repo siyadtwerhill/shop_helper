@@ -12,7 +12,7 @@ class SubscriptionController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Subscription::with(['shopOwner', 'plan']);
+        $query = $this->currentSubscriptions()->with(['shopOwner', 'plan']);
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -30,18 +30,25 @@ class SubscriptionController extends Controller
         return response()->json([
             'subscriptions' => $subscriptions,
             'stats' => [
-                'active_count' => Subscription::where('status', 'active')->count(),
-                'mrr' => Subscription::where('status', 'active')->join('plans', 'plans.id', '=', 'subscriptions.plan_id')->sum('plans.price_monthly'),
-                'trialing_count' => Subscription::where('status', 'trialing')->count(),
-                'at_risk_count' => Subscription::where('status', 'past_due')
-                    ->orWhere(fn ($q) => $q->where('current_period_end', '<=', now()->addDays(7))->whereNotIn('status', ['cancelled', 'expired']))
+                'active_count' => $this->currentSubscriptions()->where('subscriptions.status', 'active')->count(),
+                'mrr' => $this->currentSubscriptions()->where('subscriptions.status', 'active')->join('plans', 'plans.id', '=', 'subscriptions.plan_id')->sum('plans.price_monthly'),
+                'trialing_count' => $this->currentSubscriptions()->where('subscriptions.status', 'trialing')->count(),
+                'at_risk_count' => $this->currentSubscriptions()->where('subscriptions.status', 'past_due')
+                    ->orWhere(fn ($q) => $q->where('subscriptions.current_period_end', '<=', now()->addDays(7))->whereNotIn('subscriptions.status', ['cancelled', 'expired']))
                     ->count(),
-                'expired_this_month' => Subscription::where('status', 'expired')
-                    ->whereMonth('expired_at', now()->month)
-                    ->whereYear('expired_at', now()->year)
+                'expired_this_month' => $this->currentSubscriptions()->where('subscriptions.status', 'expired')
+                    ->whereMonth('subscriptions.expired_at', now()->month)
+                    ->whereYear('subscriptions.expired_at', now()->year)
                     ->count(),
             ],
         ]);
+    }
+
+    private function currentSubscriptions()
+    {
+        $latestIds = Subscription::selectRaw('MAX(subscriptions.id)')->groupBy('subscriptions.shop_owner_id');
+
+        return Subscription::whereIn('subscriptions.id', $latestIds);
     }
 
     public function show(Subscription $subscription)

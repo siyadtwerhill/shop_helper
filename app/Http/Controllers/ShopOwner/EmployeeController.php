@@ -23,6 +23,7 @@ class EmployeeController extends Controller
     public function index(Request $request)
     {
         $shop = $this->shop($request);
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
         $this->authorizeAction($request, 'employees.view');
 
         $query = Staff::with(['user.roles', 'branch'])
@@ -46,7 +47,15 @@ class EmployeeController extends Controller
                 ->orWhere('email', 'like', '%' . $term . '%'));
         }
 
-        return $query->latest()->paginate(20);
+        $shop->loadMissing('plan:id,max_staff');
+
+        return response()->json([
+            'employees' => $query->latest()->paginate(20),
+            'quota' => [
+                'used' => Staff::where('shop_owner_id', $shop->id)->count(),
+                'limit' => $shop->plan?->max_staff,
+            ],
+        ]);
     }
 
     public function store(Request $request)
@@ -128,19 +137,22 @@ class EmployeeController extends Controller
             unset($data['branch_id']);
         }
 
-        if (isset($data['name'])) {
-            $staff->user->update(['name' => $data['name']]);
-        }
-        $staff->update(Arr::only($data, ['phone', 'branch_id', 'status']));
-        if (($data['status'] ?? null) === 'inactive') {
-            $staff->user->tokens()->delete();
-        }
+        DB::transaction(function () use ($data, $staff, $shop, $request) {
+            if (isset($data['name'])) {
+                $staff->user->update(['name' => $data['name']]);
+            }
+            $staff->update(Arr::only($data, ['phone', 'branch_id', 'status']));
+            if (($data['status'] ?? null) === 'inactive') {
+                $staff->user->tokens()->delete();
+            }
 
-        if (isset($data['role_id'])) {
-            $role = Role::where('shop_owner_id', $shop->id)->findOrFail($data['role_id']);
-            $this->assertCanGrant($request, $role);
-            $staff->user->syncRoles([$role]);
-        }
+            if (isset($data['role_id'])) {
+                app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+                $role = Role::where('shop_owner_id', $shop->id)->findOrFail($data['role_id']);
+                $this->assertCanGrant($request, $role);
+                $staff->user->unsetRelation('roles')->syncRoles([$role]);
+            }
+        });
 
         return response()->json([
             'message' => 'Employee updated.',

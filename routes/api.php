@@ -29,6 +29,7 @@ use App\Http\Controllers\Admin\ModuleController;
 use App\Http\Controllers\Admin\PlanController;
 use App\Http\Controllers\Admin\SubscriptionController as AdminSubscriptionController;
 use App\Http\Controllers\Admin\PaymentController;
+use App\Http\Controllers\Admin\ShopController;
 use App\Http\Controllers\ShopOwner\EmployeeController;
 use App\Http\Controllers\ShopOwner\RoleController;
 use App\Http\Controllers\ShopOwner\BranchController;
@@ -90,6 +91,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::post('/subscription/downgrade', [SubscriptionController::class, 'scheduleDowngrade']);
 
     Route::middleware('superadmin')->group(function () {
+        Route::get('/admin/shops', [ShopController::class, 'index']);
+        Route::put('/admin/shops/{shop}/status', [ShopController::class, 'updateStatus']);
         Route::get('/users', [UserController::class, 'index']);
         Route::get('/users/{id}', [UserController::class, 'show']);
         Route::get('/users/role/{role}', [UserController::class, 'getUsersByRole']);

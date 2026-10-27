@@ -40,8 +40,15 @@ class BranchController extends Controller
         }
 
         $branches = $query->get();
+        $shop->loadMissing('plan:id,max_branches');
 
-        return response()->json(['branches' => $branches]);
+        return response()->json([
+            'branches' => $branches,
+            'quota' => [
+                'used' => Branch::where('shop_owner_id', $shop->id)->count(),
+                'limit' => $shop->plan?->max_branches,
+            ],
+        ]);
     }
 
     public function store(Request $request)

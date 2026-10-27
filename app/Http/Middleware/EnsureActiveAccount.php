@@ -16,19 +16,26 @@ class EnsureActiveAccount
         if ($user && $user->role === 'staff') {
             $staff = $user->staff;
 
-            if (! $staff || $staff->status !== 'active') {
+            if (! $staff || $staff->status !== 'active' || ! $staff->shopOwner?->is_active) {
                 $token = $user->currentAccessToken();
                 if ($token instanceof PersonalAccessToken) {
                     $token->delete();
                 }
 
                 return response()->json([
-                    'message' => 'Your account is deactivated. Please contact your shop owner.',
+                    'message' => 'Your account or shop is deactivated. Please contact your shop owner.',
                 ], 403);
             }
 
             app(PermissionRegistrar::class)
                 ->setPermissionsTeamId($staff->shop_owner_id);
+        } elseif ($user && $user->role === 'shop_owner' && ! $user->shopOwner?->is_active) {
+            $token = $user->currentAccessToken();
+            if ($token instanceof PersonalAccessToken) {
+                $token->delete();
+            }
+
+            return response()->json(['message' => 'Your shop is deactivated. Please contact support.'], 403);
         }
 
         return $next($request);

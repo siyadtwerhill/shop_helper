@@ -11,6 +11,12 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Some existing databases already have this table from an earlier setup.
+        // Keep this migration safe to run there; later migrations add its extra columns.
+        if (Schema::hasTable('sale_items')) {
+            return;
+        }
+
         Schema::create('sale_items', function (Blueprint $table) {
             $table->id();
 

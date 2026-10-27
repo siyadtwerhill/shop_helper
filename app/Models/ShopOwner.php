@@ -21,6 +21,7 @@ class ShopOwner extends Model
         'website',
         'plan_id',
         'staff_count',
+        'is_active',
     ];
 
     protected $hidden = [
@@ -31,7 +32,7 @@ class ShopOwner extends Model
     protected function casts(): array
     {
         return [
-            // no special casts needed
+            'is_active' => 'boolean',
         ];
     }
 

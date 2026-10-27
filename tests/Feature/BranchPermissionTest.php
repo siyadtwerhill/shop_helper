@@ -74,6 +74,7 @@ class BranchPermissionTest extends TestCase
             'guard_name' => 'web',
             'shop_owner_id' => $this->shopOwner->id,
         ]);
+        app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($this->shopOwner->id);
         $this->branchHeadUser->assignRole($branchHeadRole);
 
         // Update branch with head
@@ -145,11 +146,7 @@ class BranchPermissionTest extends TestCase
 
     public function test_shop_owner_can_create_branch_with_permission()
     {
-        // Create permissions
-        $createPermission = Permission::create(['name' => 'branches.create', 'guard_name' => 'web']);
-        $role = Role::create(['name' => 'owner', 'guard_name' => 'web', 'shop_owner_id' => $this->shopOwner->id]);
-        $this->shopOwnerUser->assignRole($role);
-        $role->givePermissionTo($createPermission);
+        $this->grant($this->shopOwnerUser, $this->shopOwner, 'branches.create');
 
         $branchData = [
             'name' => 'New Branch',
@@ -354,5 +351,28 @@ class BranchPermissionTest extends TestCase
 
         $response->assertStatus(403)
             ->assertJson(['message' => "You've reached your plan's branch limit (2). Upgrade to add more."]);
+    }
+
+    public function test_shop_owner_respects_employee_limit()
+    {
+        $plan = \App\Models\Plan::create([
+            'name' => 'Basic Plan',
+            'slug' => 'basic',
+            'max_staff' => 1,
+            'is_active' => true,
+        ]);
+        $this->shopOwner->update(['plan_id' => $plan->id]);
+
+        $this->grant($this->shopOwnerUser, $this->shopOwner, 'employees.create');
+        $employeeRole = Role::create(['name' => 'Cashier', 'guard_name' => 'web', 'shop_owner_id' => $this->shopOwner->id]);
+
+        $response = $this->actingAs($this->shopOwnerUser, 'sanctum')->postJson('/api/employees', [
+            'name' => 'New Employee',
+            'email' => 'new.employee@shop.com',
+            'role_id' => $employeeRole->id,
+        ]);
+
+        $response->assertStatus(403)
+            ->assertJson(['message' => "You've reached your plan's staff limit (1). Upgrade to add more."]);
     }
 }

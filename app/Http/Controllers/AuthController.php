@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\ShopOwner;
+use App\Models\Plan;
 use App\Models\Staff;
+use App\Models\Subscription;
 use App\Models\User;
 use App\Services\BlueprintPresetService;
 use Illuminate\Http\Request;
@@ -51,9 +53,13 @@ class AuthController extends Controller
 
         if ($user->role === 'staff') {
             $staff = $user->staff;
-            if (! $staff || $staff->status !== 'active') {
+            if (! $staff || $staff->status !== 'active' || ! $staff->shopOwner?->is_active) {
                 return response()->json(['message' => 'Your account is deactivated. Please contact your shop owner.'], 403);
             }
+        }
+
+        if ($user->role === 'shop_owner' && ! $user->shopOwner?->is_active) {
+            return response()->json(['message' => 'Your shop is deactivated. Please contact support.'], 403);
         }
 
         $token = $user->createToken('auth-token')->plainTextToken;
@@ -101,6 +107,7 @@ class AuthController extends Controller
         }
 
         [$user, $shopOwner] = DB::transaction(function () use ($request, $presets) {
+            $freePlan = Plan::where('slug', 'free')->firstOrFail();
             $base = Str::slug($request->owner_name, '_') ?: 'user';
             $username = $base;
             for ($n = 1; User::where('username', $username)->exists(); $n++) {
@@ -119,8 +126,15 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'shop_name' => $request->shop_name,
                 'location' => null,
-                'plan_id' => 1,
+                'plan_id' => $freePlan->id,
                 'staff_count' => 0,
+            ]);
+
+            Subscription::create([
+                'shop_owner_id' => $shop->id,
+                'plan_id' => $freePlan->id,
+                'status' => 'active',
+                'current_period_end' => now()->addMonth(),
             ]);
 
             $presets->createGenericBlueprint($shop);

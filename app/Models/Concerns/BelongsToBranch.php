@@ -17,6 +17,9 @@ use Illuminate\Database\Eloquent\Builder;
  * answer "can this action happen at all," this trait answers "which
  * rows can they see while doing it." The two compose — a branch_head
  * with employees.list.view still only sees their own branch's staff.
+ *
+ * FAIL-CLOSE: If branch context cannot be established for a non-superadmin/non-shop-owner
+ * user, return an empty result set rather than exposing all records.
  */
 trait BelongsToBranch
 {
@@ -33,17 +36,33 @@ trait BelongsToBranch
                 return; // unscoped — full shop visibility
             }
 
-            // Try to get staff relationship, but handle case where it doesn't exist
+            // For staff (including branch heads), require valid branch context
+            // Access staff relationship - Laravel will lazy load if not already loaded
             try {
                 $staff = $user->staff;
-                if ($staff && $staff->branch_id) {
-                    $builder->where($builder->getModel()->getTable() . '.branch_id', $staff->branch_id);
-                }
             } catch (\Exception $e) {
-                // If staff relationship doesn't exist or fails, don't apply scope
+                // FAIL-CLOSE: If staff relationship fails to load, return empty result
+                $builder->whereRaw('1 = 0');
                 return;
             }
-            // staff with branch_id === null (shop-wide access) stay unscoped too
+
+            // If staff relationship is missing or staff has no branch assignment,
+            // fail closed: return empty result set
+            if (!$staff || !$staff->branch_id) {
+                $builder->whereRaw('1 = 0');
+                return;
+            }
+
+            // Scope to the staff's assigned branch
+            $table = $builder->getModel()->getTable();
+            $builder->where($table . '.branch_id', $staff->branch_id);
+
+            // Also scope by shop_owner_id for tenant isolation (if the model has it)
+            // This is CRITICAL for cross-shop isolation
+            $fillable = $builder->getModel()->getFillable();
+            if (in_array('shop_owner_id', $fillable)) {
+                $builder->where($table . '.shop_owner_id', $staff->shop_owner_id);
+            }
         });
     }
 

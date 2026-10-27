@@ -4,11 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Plan extends Model
 {
-    protected $fillable = ['name', 'slug', 'description', 'price_monthly', 'max_staff', 'max_branches', 'max_products', 'is_active', 'sort_order'];
+    protected $fillable = ['name', 'slug', 'description', 'scope', 'shop_owner_id', 'price_monthly', 'max_staff', 'max_branches', 'max_products', 'is_active', 'sort_order'];
     protected $casts = ['is_active' => 'boolean'];
 
     public function modules(): BelongsToMany
@@ -24,5 +25,10 @@ class Plan extends Model
     public function shopOwners()
     {
         return $this->hasMany(ShopOwner::class);
+    }
+
+    public function specificShop(): BelongsTo
+    {
+        return $this->belongsTo(ShopOwner::class, 'shop_owner_id');
     }
 }

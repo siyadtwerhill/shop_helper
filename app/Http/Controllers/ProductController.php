@@ -81,7 +81,15 @@ class ProductController extends Controller
 
         $page = $query->orderBy($sortBy, $sortDir)->orderBy('id', 'desc')->paginate($perPage);
         $this->stock->hydrate($page->getCollection());
-        return response()->json(['products' => $page]);
+        $shop->loadMissing('plan:id,max_products');
+
+        return response()->json([
+            'products' => $page,
+            'quota' => [
+                'used' => Product::where('shop_owner_id', $shop->id)->count(),
+                'limit' => $shop->plan?->max_products,
+            ],
+        ]);
     }
 
     public function show(Request $request, Product $product)
@@ -102,6 +110,11 @@ class ProductController extends Controller
     {
         $shop = $this->shop($request);
         $this->authorizeAction($request, 'products.create');
+
+        if ($shop->plan?->max_products !== null
+            && Product::where('shop_owner_id', $shop->id)->count() >= $shop->plan->max_products) {
+            return response()->json(['message' => "You've reached your plan's product limit ({$shop->plan->max_products}). Upgrade to add more."], 403);
+        }
 
         // multipart sends custom_fields as a JSON string
         if (is_string($request->input('custom_fields'))) {
@@ -479,6 +492,12 @@ class ProductController extends Controller
         $this->authorizeAction($request, 'products.edit');
 
         abort_if($product->status !== 'archived', 422, 'This product is not archived.');
+
+        $shop = $this->shop($request);
+        if ($shop->plan?->max_products !== null
+            && Product::where('shop_owner_id', $shop->id)->count() >= $shop->plan->max_products) {
+            return response()->json(['message' => "You've reached your plan's product limit ({$shop->plan->max_products}). Upgrade to restore this product."], 403);
+        }
 
         $product->restore();
         $product->update(['status' => 'active', 'updated_by' => $request->user()->id]);

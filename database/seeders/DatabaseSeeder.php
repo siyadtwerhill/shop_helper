@@ -20,17 +20,13 @@ class DatabaseSeeder extends Seeder
             ModuleSeeder::class,
             FeatureSeeder::class,
             ShopOwnerSeeder::class,
+            SupermarketSeeder::class,
+            ClothingSeeder::class,
+            PharmacySeeder::class,
+            ElectronicsSeeder::class,
+            CafeSeeder::class,
             PricingPermissionSeeder::class,
             BranchHeadRoleSeeder::class,
         ]);
-
-        // Uncomment the shop seeders you want to run
-        // $this->call([
-        //     SupermarketSeeder::class,
-        //     ClothingSeeder::class,
-        //     PharmacySeeder::class,
-        //     ElectronicsSeeder::class,
-        //     CafeSeeder::class,
-        // ]);
     }
 }

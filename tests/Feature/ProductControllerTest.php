@@ -272,6 +272,41 @@ class ProductControllerTest extends TestCase
         $response->assertStatus(201);
     }
 
+    public function test_shop_owner_cannot_create_products_over_plan_limit(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $plan = \App\Models\Plan::create(['name' => 'Basic', 'slug' => 'basic', 'max_products' => 1]);
+        $shop->update(['plan_id' => $plan->id]);
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+        Product::factory()->for($shop)->create();
+
+        $response = $this->actingAs($user)->postJson('/api/products', []);
+
+        $response->assertStatus(403)
+            ->assertJson(['message' => "You've reached your plan's product limit (1). Upgrade to add more."]);
+    }
+
+    public function test_shop_owner_cannot_restore_product_over_plan_limit(): void
+    {
+        $shop = ShopOwner::factory()->create();
+        $plan = \App\Models\Plan::create(['name' => 'Basic', 'slug' => 'basic', 'max_products' => 1]);
+        $shop->update(['plan_id' => $plan->id]);
+        $user = User::factory()->create(['role' => 'shop_owner']);
+        $shop->user()->associate($user);
+        $shop->save();
+
+        Product::factory()->for($shop)->create();
+        $archived = Product::factory()->for($shop)->create(['status' => 'archived']);
+        $archived->delete();
+
+        $response = $this->actingAs($user)->postJson("/api/products/{$archived->id}/restore");
+
+        $response->assertStatus(403)
+            ->assertJson(['message' => "You've reached your plan's product limit (1). Upgrade to restore this product."]);
+    }
+
     public function test_shop_b_gets_404_on_shop_a_product(): void
     {
         $shopA = ShopOwner::factory()->create();

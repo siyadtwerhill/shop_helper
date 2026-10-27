@@ -20,7 +20,7 @@ class SubscriptionController extends Controller
 
         return response()->json([
             'subscription' => $shop->subscription()->with(['plan', 'pendingPlan'])->first(),
-            'plans' => Plan::where('is_active', true)->orderBy('sort_order')->get(),
+            'plans' => Plan::where('is_active', true)->where('scope', 'all')->orderBy('sort_order')->get(),
             'pending_payment' => Payment::where('shop_owner_id', $shop->id)
                 ->where('status', 'pending_verification')
                 ->latest()
@@ -67,6 +67,7 @@ class SubscriptionController extends Controller
         }
 
         $plan = Plan::findOrFail($data['plan_id']);
+        abort_if($plan->scope !== 'all', 422, 'This plan is assigned directly to a shop and cannot be purchased here.');
 
         $payment = Payment::create([
             'shop_owner_id' => $shop->id,
@@ -115,6 +116,7 @@ class SubscriptionController extends Controller
         $data = $request->validate(['plan_id' => 'required|exists:plans,id']);
 
         $targetPlan = Plan::findOrFail($data['plan_id']);
+        abort_if($targetPlan->scope !== 'all', 422, 'This plan is assigned directly to a shop.');
         if ($targetPlan->price_monthly >= $subscription->plan->price_monthly) {
             return response()->json(['message' => 'Use the upgrade flow for this plan change.'], 422);
         }
