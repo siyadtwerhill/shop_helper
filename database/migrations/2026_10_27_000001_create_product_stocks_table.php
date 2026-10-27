@@ -19,12 +19,16 @@ return new class extends Migration
             $table->id();
             
             // Product reference (catalog is shop-wide)
+            // Cascade delete is acceptable: if product is deleted, its stock tracking is no longer relevant
             $table->foreignId('product_id')->constrained()->cascadeOnDelete();
             
             // Branch reference (stock is branch-specific)
-            $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+            // NO cascade delete: preserve stock records for historical audit if branch is deleted
+            // Branch deletion should be handled via soft delete and reconciliation workflow
+            $table->foreignId('branch_id')->constrained()->restrictOnDelete();
             
             // Tenant identifier for validation
+            // Cascade delete is acceptable: if shop is deleted, all its data is removed
             $table->foreignId('shop_owner_id')->constrained()->cascadeOnDelete();
             
             // Stock quantities
