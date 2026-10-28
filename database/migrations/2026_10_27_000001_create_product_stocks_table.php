@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -52,6 +53,13 @@ return new class extends Migration
      */
     public function down(): void
     {
+        // Perform this check and schema change during a maintenance window with stock writes stopped.
+        if (Schema::hasTable('product_stocks') && DB::table('product_stocks')->exists()) {
+            throw new \RuntimeException(
+                'Cannot roll back product_stocks while stock rows exist. Preserve inventory data and use a reviewed migration procedure.'
+            );
+        }
+
         Schema::dropIfExists('product_stocks');
     }
 };

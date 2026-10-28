@@ -44,7 +44,7 @@ Route::middleware(['auth:sanctum', 'active'])->get('/user', function (Request $r
     if ($user->role === 'shop_owner') {
         $user->load(['shopOwner.plan', 'shopOwner.subscription.plan']);
     } elseif ($user->role === 'staff') {
-        $user->load(['staff.shopOwner.plan', 'staff.shopOwner.subscription.plan']);
+        $user->load(['staff.branch', 'staff.shopOwner.plan', 'staff.shopOwner.subscription.plan']);
     }
 
     // Add permissions to the user response
@@ -54,6 +54,8 @@ Route::middleware(['auth:sanctum', 'active'])->get('/user', function (Request $r
             app(PermissionRegistrar::class)->setPermissionsTeamId($shopId);
         }
         $userData['permissions'] = $user->getAllPermissions()->pluck('name')->toArray();
+        $userData['branch'] = $user->branchHeadContext();
+        $userData['is_branch_head'] = $userData['branch'] !== null;
     } else {
         // Shop owners and superadmins have all permissions
         $userData['permissions'] = [];

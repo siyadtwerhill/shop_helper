@@ -32,6 +32,7 @@ class InventoryMovementService
         ?string $note = null,
         bool $allowNegativeStock = false,
         ?ProductVariant $variant = null,
+        ?int $branchId = null,
     ): InventoryMovement {
         if ($type === MovementType::Adjustment) {
             throw new InvalidArgumentException('Use adjust() for adjustment movements.');
@@ -39,9 +40,11 @@ class InventoryMovementService
 
         return DB::transaction(function () use (
             $product, $productUnit, $type, $quantity, $referenceType, $referenceId,
-            $createdBy, $note, $allowNegativeStock, $variant
+            $createdBy, $note, $allowNegativeStock, $variant, $branchId
         ) {
+            $branchId = $this->resolveBranchId($branchId);
             $locked = $this->lock($product, $productUnit, $variant);
+            $this->assertBranchBelongsToProduct($branchId, $locked);
 
             $magnitude  = $this->conversion->toBaseQuantity($productUnit, $this->dec($quantity));
             $signedBase = $type->increasesStock() ? $magnitude : bcmul($magnitude, '-1', 4);
@@ -50,6 +53,7 @@ class InventoryMovementService
 
             $movement = InventoryMovement::create([
                 'product_id'     => $locked->id,
+                'branch_id'      => $branchId,
                 'variant_id'     => $variant?->id,
                 'unit_id'        => $productUnit->id,
                 'quantity'       => $this->dec($quantity),
@@ -78,12 +82,15 @@ class InventoryMovementService
         ?string $note = null,
         ?ProductVariant $variant = null,
         bool $allowNegativeStock = false,
+        ?int $branchId = null,
     ): InventoryMovement {
         return DB::transaction(function () use (
             $product, $productUnit, $signedQuantity, $referenceType, $referenceId,
-            $createdBy, $note, $variant, $allowNegativeStock
+            $createdBy, $note, $variant, $allowNegativeStock, $branchId
         ) {
+            $branchId = $this->resolveBranchId($branchId);
             $locked = $this->lock($product, $productUnit, $variant);
+            $this->assertBranchBelongsToProduct($branchId, $locked);
 
             $qty = $this->dec($signedQuantity);
             if (bccomp($qty, '0', 4) === 0) {
@@ -98,6 +105,7 @@ class InventoryMovementService
 
             $movement = InventoryMovement::create([
                 'product_id'     => $locked->id,
+                'branch_id'      => $branchId,
                 'variant_id'     => $variant?->id,
                 'unit_id'        => $productUnit->id,
                 'quantity'       => $qty,
@@ -125,14 +133,14 @@ class InventoryMovementService
         return $this->record($p, $u, MovementType::Purchase, $qty, $referenceType, $referenceId, $createdBy, allowNegativeStock: true, variant: $variant);
     }
 
-    public function sale(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null, bool $allowNegativeStock = false, ?ProductVariant $variant = null): InventoryMovement
+    public function sale(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null, bool $allowNegativeStock = false, ?ProductVariant $variant = null, ?int $branchId = null): InventoryMovement
     {
-        return $this->record($p, $u, MovementType::Sale, $qty, $referenceType, $referenceId, $createdBy, allowNegativeStock: $allowNegativeStock, variant: $variant);
+        return $this->record($p, $u, MovementType::Sale, $qty, $referenceType, $referenceId, $createdBy, allowNegativeStock: $allowNegativeStock, variant: $variant, branchId: $branchId);
     }
 
-    public function saleReturn(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null, ?ProductVariant $variant = null): InventoryMovement
+    public function saleReturn(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null, ?ProductVariant $variant = null, ?int $branchId = null): InventoryMovement
     {
-        return $this->record($p, $u, MovementType::SaleReturn, $qty, $referenceType, $referenceId, $createdBy, allowNegativeStock: true, variant: $variant);
+        return $this->record($p, $u, MovementType::SaleReturn, $qty, $referenceType, $referenceId, $createdBy, allowNegativeStock: true, variant: $variant, branchId: $branchId);
     }
 
     public function purchaseReturn(Product $p, ProductUnit $u, string|float $qty, ?string $referenceType = null, ?int $referenceId = null, ?int $createdBy = null, ?ProductVariant $variant = null): InventoryMovement
@@ -226,8 +234,10 @@ class InventoryMovementService
      */
     public function assignUnassignedStock(Product $product, ProductVariant $variant, string $quantity, ?int $userId = null): void
     {
-        DB::transaction(function () use ($product, $variant, $quantity, $userId) {
+        $branchId = $this->resolveBranchId(null);
+        DB::transaction(function () use ($product, $variant, $quantity, $userId, $branchId) {
             $locked = Product::whereKey($product->id)->lockForUpdate()->firstOrFail();
+            $this->assertBranchBelongsToProduct($branchId, $locked);
 
             if ($locked->stock_mode !== 'from_variants' || (int) $variant->product_id !== (int) $locked->id) {
                 throw ValidationException::withMessages(['variant_id' => ['That variant does not belong to this product.']]);
@@ -244,6 +254,7 @@ class InventoryMovementService
             foreach ([[null, bcmul($qty, '-1', 4)], [$variant->id, $qty]] as [$variantId, $signed]) {
                 InventoryMovement::create([
                     'product_id'     => $locked->id,
+                    'branch_id'      => $branchId,
                     'variant_id'     => $variantId,
                     'unit_id'        => $base->id,
                     'quantity'       => $signed,
@@ -256,5 +267,26 @@ class InventoryMovementService
                 ]);
             }
         });
+    }
+
+    private function resolveBranchId(?int $branchId): ?int
+    {
+        if ($branchId !== null) {
+            return $branchId;
+        }
+
+        $user = auth()->user();
+
+        return $user?->isBranchHead() ? (int) $user->staff->branch_id : null;
+    }
+
+    private function assertBranchBelongsToProduct(?int $branchId, Product $product): void
+    {
+        if ($branchId !== null && ! DB::table('branches')
+            ->where('id', $branchId)
+            ->where('shop_owner_id', $product->shop_owner_id)
+            ->exists()) {
+            throw new InvalidArgumentException('The movement branch does not belong to the product shop.');
+        }
     }
 }

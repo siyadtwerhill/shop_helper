@@ -100,6 +100,7 @@ class BranchHeadVisibilityTest extends TestCase
             'shop_owner_id' => $this->shopOwner->id,
         ]);
 
+        app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($this->shopOwner->id);
         $this->branchHead1User->assignRole($branchHeadRole);
         $this->branchHead2User->assignRole($branchHeadRole);
 
@@ -164,7 +165,7 @@ class BranchHeadVisibilityTest extends TestCase
             ->assertJsonCount(2, 'employees.data'); // Only branch head 2 + staff 2
     }
 
-    public function test_staff_without_branch_assignment_sees_all_staff()
+    public function test_staff_without_branch_assignment_fails_closed()
     {
         // Create staff without branch assignment
         $shopWideStaffUser = User::create([
@@ -194,7 +195,7 @@ class BranchHeadVisibilityTest extends TestCase
             ->getJson('/api/employees');
 
         $response->assertStatus(200)
-            ->assertJsonCount(5, 'employees.data'); // All staff including shop-wide staff
+            ->assertJsonCount(0, 'employees.data');
     }
 
     public function test_branch_head_can_only_see_their_branch()
@@ -247,6 +248,177 @@ class BranchHeadVisibilityTest extends TestCase
 
         // The response might be 404 (not found due to scope) or 403 (forbidden)
         $this->assertTrue(in_array($response->status(), [403, 404]));
+    }
+
+    public function test_branch_head_cannot_deactivate_employee_in_another_branch()
+    {
+        $this->grant($this->branchHead1User, $this->shopOwner, 'employees.delete');
+        $otherBranchStaff = $this->createStaff('Other Branch Employee', 'other-branch@shop.com', $this->branch2->id);
+
+        $this->actingAs($this->branchHead1User, 'sanctum')
+            ->deleteJson("/api/employees/{$otherBranchStaff->id}")
+            ->assertNotFound();
+
+        $this->assertSame('active', $otherBranchStaff->fresh()->status);
+    }
+
+    public function test_branch_head_cannot_assign_the_branch_head_role_to_a_new_employee()
+    {
+        $this->grant($this->branchHead1User, $this->shopOwner, 'employees.create');
+        $branchHeadRole = Role::where('shop_owner_id', $this->shopOwner->id)
+            ->where('name', 'branch_head')
+            ->firstOrFail();
+
+        $response = $this->actingAs($this->branchHead1User, 'sanctum')
+            ->postJson('/api/employees', [
+                'name' => 'New Branch Head',
+                'email' => 'new-head@shop.com',
+                'role_id' => $branchHeadRole->id,
+            ]);
+
+        $response->assertForbidden();
+        $this->assertDatabaseMissing('users', ['email' => 'new-head@shop.com']);
+    }
+
+    public function test_branch_head_cannot_promote_an_employee_to_branch_head()
+    {
+        $this->grant($this->branchHead1User, $this->shopOwner, 'employees.edit');
+        $employee = $this->createStaff('Employee', 'employee@shop.com', $this->branch1->id);
+        $branchHeadRole = Role::where('shop_owner_id', $this->shopOwner->id)
+            ->where('name', 'branch_head')
+            ->firstOrFail();
+
+        $this->actingAs($this->branchHead1User, 'sanctum')
+            ->putJson("/api/employees/{$employee->id}", ['role_id' => $branchHeadRole->id])
+            ->assertForbidden();
+
+        $this->assertFalse($employee->user->fresh()->hasRole('branch_head'));
+    }
+
+    public function test_shop_owner_cannot_assign_branch_head_from_employee_create_form()
+    {
+        $branchHeadRole = Role::where('shop_owner_id', $this->shopOwner->id)
+            ->where('name', 'branch_head')
+            ->firstOrFail();
+
+        $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->postJson('/api/employees', [
+                'name' => 'New Branch Head',
+                'email' => 'owner-created-head@shop.com',
+                'role_id' => $branchHeadRole->id,
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('users', ['email' => 'owner-created-head@shop.com']);
+    }
+
+    public function test_new_employee_uses_the_default_password()
+    {
+        $role = Role::create([
+            'name' => 'Cashier',
+            'guard_name' => 'web',
+            'shop_owner_id' => $this->shopOwner->id,
+        ]);
+
+        $response = $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->postJson('/api/employees', [
+                'name' => 'New Employee',
+                'email' => 'default-password@shop.com',
+                'role_id' => $role->id,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('default_password', '12345678');
+
+        $employee = User::where('email', 'default-password@shop.com')->firstOrFail();
+        $this->assertTrue(Hash::check('12345678', $employee->password));
+    }
+
+    public function test_shop_owner_cannot_promote_employee_from_employee_edit_form()
+    {
+        $employee = $this->createStaff('Regular Employee', 'regular-employee@shop.com', $this->branch1->id);
+        $branchHeadRole = Role::where('shop_owner_id', $this->shopOwner->id)
+            ->where('name', 'branch_head')
+            ->firstOrFail();
+
+        $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->putJson("/api/employees/{$employee->id}", ['role_id' => $branchHeadRole->id])
+            ->assertForbidden();
+
+        $this->assertFalse($employee->user->fresh()->hasRole('branch_head'));
+    }
+
+    public function test_employee_form_cannot_change_an_assigned_branch_heads_role_or_branch()
+    {
+        $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->putJson("/api/employees/{$this->branchHead1->id}", [
+                'branch_id' => $this->branch2->id,
+            ])
+            ->assertForbidden();
+
+        $this->assertSame($this->branch1->id, $this->branchHead1->fresh()->branch_id);
+        $this->assertSame($this->branchHead1->id, $this->branch1->fresh()->head_staff_id);
+    }
+
+    public function test_branch_form_assigns_the_branch_head_role_and_branch_together()
+    {
+        $employee = $this->createStaff('Branch Candidate', 'branch-candidate@shop.com', $this->branch1->id);
+
+        $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->putJson("/api/branches/{$this->branch1->id}", [
+                'head_staff_id' => $employee->id,
+            ])
+            ->assertOk();
+
+        $this->assertSame($this->branch1->id, $employee->fresh()->branch_id);
+        $this->assertSame($employee->id, $this->branch1->fresh()->head_staff_id);
+        $this->assertTrue($employee->user->fresh()->hasRole('branch_head'));
+    }
+
+    public function test_branch_head_role_is_reported_as_system_and_cannot_be_deleted_or_renamed()
+    {
+        $role = Role::where('shop_owner_id', $this->shopOwner->id)
+            ->where('name', 'branch_head')
+            ->firstOrFail();
+        // Exercise the reserved-name protection even for legacy rows that were not marked is_system.
+        $role->update(['is_system' => false]);
+
+        $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->getJson('/api/roles')
+            ->assertOk()
+            ->assertJsonPath('roles.0.is_system', true);
+
+        $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->putJson("/api/roles/{$role->id}", ['name' => 'Supervisor'])
+            ->assertStatus(422);
+
+        $this->actingAs($this->shopOwnerUser, 'sanctum')
+            ->deleteJson("/api/roles/{$role->id}")
+            ->assertStatus(422);
+
+        $this->assertDatabaseHas('roles', ['id' => $role->id, 'name' => 'branch_head']);
+    }
+
+    public function test_branch_head_with_stale_assignment_cannot_list_shop_employees()
+    {
+        $this->grant($this->branchHead1User, $this->shopOwner, 'employees.view');
+        $this->branch1->update(['head_staff_id' => null]);
+
+        $this->actingAs($this->branchHead1User, 'sanctum')
+            ->getJson('/api/employees')
+            ->assertForbidden();
+    }
+
+    public function test_branch_head_cannot_change_their_branch_assignment()
+    {
+        $this->grant($this->branchHead1User, $this->shopOwner, 'employees.edit');
+
+        $this->actingAs($this->branchHead1User, 'sanctum')
+            ->putJson("/api/employees/{$this->branchHead1->id}", [
+                'branch_id' => $this->branch2->id,
+            ])
+            ->assertOk();
+
+        $this->assertSame($this->branch1->id, $this->branchHead1->fresh()->branch_id);
     }
 
     public function test_belongstobranch_trait_prevents_cross_branch_access()

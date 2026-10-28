@@ -49,6 +49,7 @@ class RoleController extends Controller
             'id' => $role->id,
             'name' => $role->name,
             'description' => $role->description,
+            'is_system' => $this->isSystemRole($role),
             'employee_count' => (int) ($employeeCounts[$role->id] ?? 0),
         ]);
 
@@ -82,7 +83,12 @@ class RoleController extends Controller
         $rolePermissionIds = $role->permissions()->pluck('id')->toArray();
 
         return response()->json([
-            'role' => ['id' => $role->id, 'name' => $role->name, 'description' => $role->description],
+            'role' => [
+                'id' => $role->id,
+                'name' => $role->name,
+                'description' => $role->description,
+                'is_system' => $this->isSystemRole($role),
+            ],
             'available_modules' => $availableModules,
             'locked_modules' => $lockedModules,
             'granted_permission_ids' => $rolePermissionIds,
@@ -102,6 +108,10 @@ class RoleController extends Controller
             ],
             'description' => 'nullable|string|max:255',
         ]);
+
+        if ($this->isBranchHeadRoleName($data['name'])) {
+            return response()->json(['message' => 'Branch Head is a system role. Assign it from a branch instead.'], 422);
+        }
 
         // Spatie Teams scopes uniqueness per team automatically once
         // config('permission.teams') is true and the team id is set above.
@@ -156,6 +166,13 @@ class RoleController extends Controller
             'description' => 'nullable|string|max:255',
         ]);
 
+        if ($this->isSystemRole($role)) {
+            return response()->json(['message' => 'System roles can only be changed through their permissions.'], 422);
+        }
+        if (isset($data['name']) && $this->isBranchHeadRoleName($data['name'])) {
+            return response()->json(['message' => 'Branch Head is a system role and cannot be renamed or assigned through employee roles.'], 422);
+        }
+
         $role->update($data);
 
         return response()->json(['message' => 'Role updated.', 'role' => $role]);
@@ -167,7 +184,7 @@ class RoleController extends Controller
         abort_if($role->shop_owner_id !== $shop->id, 403);
 
         // Prevent deletion of system roles
-        if ($role->is_system) {
+        if ($this->isSystemRole($role)) {
             return response()->json(['message' => 'Cannot delete system roles.'], 422);
         }
 
@@ -185,5 +202,15 @@ class RoleController extends Controller
         $role->delete();
 
         return response()->json(['message' => 'Role deleted.']);
+    }
+
+    private function isSystemRole(Role $role): bool
+    {
+        return (bool) $role->is_system || $this->isBranchHeadRoleName($role->name);
+    }
+
+    private function isBranchHeadRoleName(string $name): bool
+    {
+        return str_replace('_', ' ', strtolower(trim($name))) === 'branch head';
     }
 }

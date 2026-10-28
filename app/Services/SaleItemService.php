@@ -34,6 +34,7 @@ class SaleItemService
         ?int $createdBy = null,
         bool $allowNegativeStock = false,
         ?ProductVariant $variant = null,
+        ?int $branchId = null,
     ): SaleItem {
         if (! $productUnit->is_sellable) {
             throw new InvalidArgumentException(
@@ -41,7 +42,7 @@ class SaleItemService
             );
         }
 
-        return DB::transaction(function () use ($product, $productUnit, $quantity, $unitPrice, $saleId, $originalUnitPrice, $discountAmount, $createdBy, $allowNegativeStock, $variant) {
+        return DB::transaction(function () use ($product, $productUnit, $quantity, $unitPrice, $saleId, $originalUnitPrice, $discountAmount, $createdBy, $allowNegativeStock, $variant, $branchId) {
             $baseQuantity = $this->conversion->toBaseQuantity($productUnit, $quantity);
 
             $saleItem = SaleItem::create([
@@ -65,6 +66,7 @@ class SaleItemService
                 createdBy: $createdBy,
                 allowNegativeStock: $allowNegativeStock,
                 variant: $variant,
+                branchId: $branchId,
             );
 
             return $saleItem;
@@ -83,12 +85,13 @@ class SaleItemService
         string $unitPrice,
         int $saleId,
         ?int $createdBy = null,
+        ?int $branchId = null,
     ): SaleItem {
         if (! $unit->is_sellable) {
             throw new InvalidArgumentException("Unit #{$unit->id} is not sellable for product #{$bundleProduct->id}.");
         }
 
-        return DB::transaction(function () use ($bundleProduct, $bundle, $unit, $quantity, $unitPrice, $saleId, $createdBy) {
+        return DB::transaction(function () use ($bundleProduct, $bundle, $unit, $quantity, $unitPrice, $saleId, $createdBy, $branchId) {
             $baseQuantity = $this->conversion->toBaseQuantity($unit, $quantity);
 
             $item = SaleItem::create([
@@ -109,6 +112,7 @@ class SaleItemService
                 $createdBy,
                 SaleItem::class,
                 $item->id,
+                branchId: $branchId,
             );
 
             return $item;

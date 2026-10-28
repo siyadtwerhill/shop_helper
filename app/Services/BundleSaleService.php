@@ -24,6 +24,7 @@ class BundleSaleService
         ?string $referenceType = null,
         ?int $referenceId = null,
         bool $allowNegativeStock = false,
+        ?int $branchId = null,
     ): array {
         $movements = [];
 
@@ -47,6 +48,7 @@ class BundleSaleService
                 createdBy: $createdBy,
                 allowNegativeStock: $allowNegativeStock,
                 variant: $variant,
+                branchId: $branchId,
             );
         }
 

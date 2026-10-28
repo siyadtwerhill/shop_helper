@@ -5,12 +5,27 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
+use Spatie\Permission\PermissionRegistrar;
 use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, HasRoles;
+
+    protected static function booted(): void
+    {
+        static::creating(function (User $user): void {
+            if (blank($user->account_code)) {
+                do {
+                    $code = 'SP-' . Str::upper(Str::random(12));
+                } while (static::where('account_code', $code)->exists());
+
+                $user->account_code = $code;
+            }
+        });
+    }
 
     protected $fillable = ['name', 'username', 'email', 'password', 'role', 'profile_photo', 'phone'];
     protected $hidden = ['password', 'remember_token'];
@@ -45,18 +60,41 @@ class User extends Authenticatable
     // top-level account type.
     public function isBranchHead(): bool
     {
-        if (!$this->isStaff()) {
+        if (! $this->isStaff()) {
             return false;
         }
 
-        // Check Spatie role first (with team context)
-        $hasRole = $this->hasRole('Branch Head');
+        $staff = $this->staff;
+        $branch = $staff?->branch;
 
-        // Also verify branch.head_staff_id matches this staff record
-        $matchesBranchHead = $this->staff && $this->staff->branch && $this->staff->branch->head_staff_id === $this->staff->id;
+        if (! $staff || $staff->status !== 'active' || ! $branch || ! $branch->is_active
+            || (int) $staff->shop_owner_id !== (int) $branch->shop_owner_id
+            || (int) $staff->branch_id !== (int) $branch->id
+            || (int) $branch->head_staff_id !== (int) $staff->id) {
+            return false;
+        }
 
-        // Both should be true for consistency
-        return $hasRole && $matchesBranchHead;
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeamId = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($staff->shop_owner_id);
+        $this->unsetRelation('roles')->unsetRelation('permissions');
+
+        try {
+            return $this->hasAnyRole(['Branch Head', 'branch_head']);
+        } finally {
+            $this->unsetRelation('roles')->unsetRelation('permissions');
+            $registrar->setPermissionsTeamId($previousTeamId);
+        }
+    }
+
+    /** Verified branch context for Branch Head clients; stale assignments return null. */
+    public function branchHeadContext(): ?array
+    {
+        if (! $this->isBranchHead()) {
+            return null;
+        }
+
+        return $this->staff->branch->only(['id', 'name']);
     }
 
     public function shopOwner()
@@ -66,6 +104,8 @@ class User extends Authenticatable
 
     public function staff()
     {
-        return $this->hasOne(Staff::class);
+        // Identity resolution must bypass Staff's row scope; the scope itself
+        // reads this relation to establish the authenticated staff member's branch.
+        return $this->hasOne(Staff::class)->withoutGlobalScope('branch');
     }
 }

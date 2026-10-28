@@ -5,7 +5,9 @@ namespace App\Http\Controllers\ShopOwner;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\BranchHeadAssignmentHistory;
+use App\Models\InventoryMovement;
 use App\Models\Role;
+use App\Models\Sale;
 use App\Models\Staff;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -73,20 +75,16 @@ class BranchController extends Controller
             'name' => 'required|string|max:255',
             'address' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:255',
-            'head_staff_id' => ['nullable', Rule::exists('staff', 'id')->where('shop_owner_id', $shop->id)],
+            'head_staff_id' => 'prohibited',
         ]);
 
         $branch = Branch::create([
-            'shop_owner_id' => $shop->id,
-            'name' => $data['name'],
-            'address' => $data['address'] ?? null,
-            'phone' => $data['phone'] ?? null,
-            'is_active' => true,
-        ]);
-
-        if (!empty($data['head_staff_id'])) {
-            $this->assignHead($branch, $data['head_staff_id']);
-        }
+                'shop_owner_id' => $shop->id,
+                'name' => $data['name'],
+                'address' => $data['address'] ?? null,
+                'phone' => $data['phone'] ?? null,
+                'is_active' => true,
+            ]);
 
         return response()->json(['message' => 'Branch created.', 'branch' => $branch->fresh('head.user')], 201);
     }
@@ -106,15 +104,22 @@ class BranchController extends Controller
             'name' => 'sometimes|string|max:255',
             'address' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:255',
-            'head_staff_id' => ['nullable', Rule::exists('staff', 'id')->where('shop_owner_id', $shop->id)],
+            'head_staff_id' => [
+                'nullable',
+                Rule::exists('staff', 'id')
+                    ->where('shop_owner_id', $shop->id)
+                    ->where('branch_id', $branch->id),
+            ],
             'is_active' => 'sometimes|boolean',
         ]);
 
-        $branch->update($request->only(['name', 'address', 'phone', 'is_active']));
+        DB::transaction(function () use ($branch, $request, $data) {
+            $branch->update($request->only(['name', 'address', 'phone', 'is_active']));
 
-        if ($request->has('head_staff_id')) {
-            $this->assignHead($branch, $data['head_staff_id']);
-        }
+            if ($request->has('head_staff_id')) {
+                $this->assignHead($branch, $data['head_staff_id']);
+            }
+        });
 
         return response()->json(['message' => 'Branch updated.', 'branch' => $branch->fresh('head.user')]);
     }
@@ -133,73 +138,104 @@ class BranchController extends Controller
             return response()->json(['message' => 'Move or remove staff from this branch before deleting it.'], 422);
         }
 
+        if (Sale::where('branch_id', $branch->id)->exists()
+            || InventoryMovement::where('branch_id', $branch->id)->exists()) {
+            return response()->json(['message' => 'This branch has sales or inventory history and cannot be deleted.'], 422);
+        }
+
         $branch->delete();
 
         return response()->json(['message' => 'Branch deleted.']);
     }
 
-    /**
-     * Assign a branch head with transaction safety, additive role assignment, and audit logging.
-     * 
-     * Transaction-wrapped to ensure branch update, staff assignment, and role changes
-     * succeed together or roll back together. Uses assignRole() for additive role assignment
-     * (preserves existing roles like Cashier) and removeRole() for clean removal.
-     */
+    /** Assign or move a head; branch changes, roles, and audit rows commit together. */
     private function assignHead(Branch $branch, ?int $staffId): void
     {
         $shop = $branch->shopOwner;
-        $previousHeadStaffId = $branch->head_staff_id;
         $actingUserId = auth()->id();
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeamId = $registrar->getPermissionsTeamId();
 
-        DB::transaction(function () use ($branch, $staffId, $shop, $previousHeadStaffId, $actingUserId) {
-            app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+        try {
+            DB::transaction(function () use ($branch, $staffId, $shop, $actingUserId, $registrar) {
+                $registrar->setPermissionsTeamId($shop->id);
+                $lockedBranch = Branch::whereKey($branch->id)->lockForUpdate()->firstOrFail();
+                abort_unless((int) $lockedBranch->shop_owner_id === (int) $shop->id, 404);
 
-            // Step 1: Remove Branch Head role from previous head if being replaced
-            if ($previousHeadStaffId && $previousHeadStaffId !== $staffId) {
-                $previousHead = Staff::find($previousHeadStaffId);
-                if ($previousHead) {
-                    // Remove only the Branch Head role, preserve other roles
-                    $previousHead->user->removeRole('Branch Head');
+                $staff = null;
+                $branchHeadRoles = Role::where('shop_owner_id', $shop->id)
+                    ->whereIn('name', ['Branch Head', 'branch_head'])->get();
+                $branchHeadRole = $branchHeadRoles->first();
+                $sourceBranches = collect();
+                if ($staffId) {
+                    $staff = Staff::where('shop_owner_id', $shop->id)
+                        ->whereKey($staffId)->lockForUpdate()->firstOrFail();
+                    abort_if($staff->status !== 'active', 422, 'Cannot assign an inactive staff member as branch head');
+                    abort_unless(
+                        (int) $staff->branch_id === (int) $lockedBranch->id,
+                        422,
+                        'Only an active employee assigned to this branch can become its Branch Head.'
+                    );
+
+                    abort_if(! $branchHeadRole, 404, 'Branch Head role is not configured for this shop.');
+
+                    // A head belongs to one branch. Lock and clear any stale/old head pointers.
+                    $sourceBranches = Branch::where('shop_owner_id', $shop->id)
+                        ->where('head_staff_id', $staff->id)
+                        ->where('id', '!=', $lockedBranch->id)
+                        ->orderBy('id')->lockForUpdate()->get();
                 }
-            }
 
-            // Step 2: Update branch's head_staff_id
-            $branch->update(['head_staff_id' => $staffId]);
-
-            // Step 3: If assigning a new head
-            if ($staffId) {
-                $staff = Staff::findOrFail($staffId);
-
-                // Validate staff belongs to the same shop
-                abort_if($staff->shop_owner_id !== $shop->id, 403, 'Staff must belong to the same shop');
-                
-                // Validate staff is active
-                abort_if($staff->status !== 'active', 422, 'Cannot assign an inactive staff member as branch head');
-
-                // Assign staff to this branch
-                $staff->update(['branch_id' => $branch->id]);
-
-                // Assign Branch Head role additively (preserves existing roles)
-                $branchHeadRole = Role::where('shop_owner_id', $shop->id)
-                    ->where('name', 'Branch Head')
-                    ->first();
-
-                if ($branchHeadRole) {
-                    $staff->user->assignRole($branchHeadRole);
+                $previousHeadStaffId = $lockedBranch->head_staff_id;
+                foreach ($sourceBranches as $sourceBranch) {
+                    $sourceBranch->update(['head_staff_id' => null]);
+                    BranchHeadAssignmentHistory::log(
+                        shopOwnerId: $shop->id,
+                        branchId: $sourceBranch->id,
+                        previousHeadStaffId: $staff->id,
+                        newHeadStaffId: null,
+                        assignedByUserId: $actingUserId,
+                        action: 'reassigned',
+                        notes: "Staff ID {$staff->id} moved to branch {$lockedBranch->id}"
+                    );
                 }
-            }
-        });
 
-        // Step 4: Log assignment history after successful transaction
-        $action = $staffId ? ($previousHeadStaffId ? 'replaced' : 'assigned') : 'removed';
-        BranchHeadAssignmentHistory::log(
-            shopOwnerId: $shop->id,
-            branchId: $branch->id,
-            previousHeadStaffId: $previousHeadStaffId,
-            newHeadStaffId: $staffId,
-            assignedByUserId: $actingUserId,
-            action: $action,
-            notes: $staffId ? "Staff ID {$staffId} assigned as branch head" : "Branch head removed"
-        );
+                if ((int) $previousHeadStaffId !== (int) $staffId || $previousHeadStaffId === null || $sourceBranches->isNotEmpty()) {
+                    $lockedBranch->update(['head_staff_id' => $staffId]);
+                }
+
+                if ($staff) {
+                    // A Branch Head has exactly one role. Replacing the team role set
+                    // avoids combining Branch Head permissions with a previous role.
+                    $staff->user->syncRoles([$branchHeadRole]);
+                }
+
+                if ($previousHeadStaffId && (int) $previousHeadStaffId !== (int) $staffId) {
+                    $previousHead = Staff::where('shop_owner_id', $shop->id)
+                        ->whereKey($previousHeadStaffId)->lockForUpdate()->first();
+
+                    if ($previousHead && ! Branch::where('shop_owner_id', $shop->id)
+                        ->where('head_staff_id', $previousHead->id)->exists()) {
+                        foreach ($branchHeadRoles as $role) {
+                            $previousHead->user->removeRole($role);
+                        }
+                    }
+                }
+
+                if ((int) $previousHeadStaffId !== (int) $staffId || $previousHeadStaffId === null) {
+                    BranchHeadAssignmentHistory::log(
+                        shopOwnerId: $shop->id,
+                        branchId: $lockedBranch->id,
+                        previousHeadStaffId: $previousHeadStaffId,
+                        newHeadStaffId: $staffId,
+                        assignedByUserId: $actingUserId,
+                        action: $staffId ? ($previousHeadStaffId ? 'replaced' : 'assigned') : 'removed',
+                        notes: $staffId ? "Staff ID {$staffId} assigned as branch head" : 'Branch head removed'
+                    );
+                }
+            }, attempts: 3);
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeamId);
+        }
     }
 }

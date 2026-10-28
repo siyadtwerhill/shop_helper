@@ -177,7 +177,7 @@ class ProductControllerTest extends TestCase
         $response->assertStatus(404);
     }
 
-    public function test_branch_head_only_sees_their_branch_products(): void
+    public function test_branch_head_sees_the_shared_catalog_across_branches(): void
     {
         $shop = ShopOwner::factory()->create();
         $branch1 = Branch::factory()->create(['shop_owner_id' => $shop->id]);
@@ -198,6 +198,7 @@ class ProductControllerTest extends TestCase
             'branch_id' => $branch1->id,
             'status' => 'active',
         ]);
+        $branch1->update(['head_staff_id' => $branchHead->id]);
 
         // Set team context for permissions
         app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
@@ -208,18 +209,24 @@ class ProductControllerTest extends TestCase
             'guard_name' => 'web',
             'shop_owner_id' => $shop->id,
         ]);
+        $viewPermission = \App\Models\Permission::firstOrCreate(['name' => 'products.view', 'guard_name' => 'web']);
+        $branchHeadRole->givePermissionTo($viewPermission);
         $branchHeadUser->assignRole($branchHeadRole);
 
         // Create products in both branches
         Product::factory()->for($shop)->forBranch($branch1->id)->create(['name' => 'Branch 1 Product']);
-        Product::factory()->for($shop)->forBranch($branch2->id)->create(['name' => 'Branch 2 Product']);
+        $branch2Product = Product::factory()->for($shop)->forBranch($branch2->id)->create(['name' => 'Branch 2 Product']);
 
         $response = $this->actingAs($branchHeadUser)->getJson('/api/products');
 
         $response->assertOk();
         $products = $response->json('products.data');
-        $this->assertCount(1, $products);
-        $this->assertEquals('Branch 1 Product', $products[0]['name']);
+        $this->assertCount(2, $products);
+        $this->assertEqualsCanonicalizing(
+            ['Branch 1 Product', 'Branch 2 Product'],
+            array_column($products, 'name')
+        );
+        $this->actingAs($branchHeadUser)->getJson("/api/products/{$branch2Product->id}")->assertOk();
     }
 
     public function test_staff_without_products_create_permission_gets_403(): void
@@ -436,7 +443,7 @@ class ProductControllerTest extends TestCase
         $catalogUnit = \App\Models\Unit::factory()->create();
         $nonBaseUnit = \App\Models\ProductUnit::factory()->for($product)->forUnit($catalogUnit)->create(['is_base' => false]);
 
-        \App\Models\InventoryMovement::factory()->for($product)->create(['unit_id' => $catalogUnit->id]);
+        \App\Models\InventoryMovement::factory()->for($product)->create(['unit_id' => $nonBaseUnit->id]);
 
         $response = $this->actingAs($user)->deleteJson("/api/products/{$product->id}/units/{$nonBaseUnit->id}");
 

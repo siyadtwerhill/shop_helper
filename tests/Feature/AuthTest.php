@@ -28,6 +28,23 @@ class AuthTest extends TestCase
         $response->assertJsonPath('message', 'Your account is deactivated. Please contact your shop owner.');
     }
 
+    public function test_shop_owner_login_keeps_existing_profile_response(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'shop_owner',
+            'password' => bcrypt('password'),
+        ]);
+        $shop = ShopOwner::factory()->create(['user_id' => $user->id]);
+
+        $this->postJson('/api/login', [
+            'email' => $user->email,
+            'password' => 'password',
+        ])->assertOk()
+            ->assertJsonPath('role', 'shop_owner')
+            ->assertJsonPath('shop_owner.id', $shop->id)
+            ->assertJsonMissingPath('user.is_branch_head');
+    }
+
     public function test_old_token_for_deactivated_staff_returns_403(): void
     {
         $shop = ShopOwner::factory()->create();

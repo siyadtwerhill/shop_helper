@@ -11,6 +11,7 @@ class Sale extends Model
 
     protected $fillable = [
         'shop_owner_id',
+        'branch_id',
         'subtotal',
         'total_amount',
         'total_discount',
@@ -28,6 +29,11 @@ class Sale extends Model
     public function shopOwner()
     {
         return $this->belongsTo(ShopOwner::class);
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function items()

@@ -61,14 +61,6 @@ trait ResolvesShop
     {
         abort_unless($product->shop_owner_id === $this->shop($request)->id, 404);
 
-        $user = $request->user();
-        $branchId = $user->isBranchHead() ? $user->staff?->branch_id : null;
-
-        // Shop-wide products (branch_id null) stay visible to branch heads.
-        if ($branchId && $product->branch_id !== null && (int) $product->branch_id !== (int) $branchId) {
-            abort(404);
-        }
-
         return $product;
     }
 }

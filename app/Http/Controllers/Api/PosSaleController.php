@@ -31,9 +31,13 @@ class PosSaleController extends Controller
             'discount_amount'    => 'nullable|numeric|min:0',
         ]);
 
-        $sale = DB::transaction(function () use ($data, $shop, $request) {
+        $user = $request->user();
+        $branchId = $user->isBranchHead() ? (int) $user->staff->branch_id : null;
+
+        $sale = DB::transaction(function () use ($data, $shop, $request, $branchId) {
             $sale = Sale::create([
                 'shop_owner_id'   => $shop->id,
+                'branch_id'       => $branchId,
                 'total_discount'  => $data['discount_amount'] ?? 0,
                 'subtotal'        => 0,
                 'total_amount'    => 0,
@@ -71,6 +75,7 @@ class PosSaleController extends Controller
                     $this->saleItems->sellBundle(
                         $product, $bundle, $unit, $item['quantity'],
                         (string) $item['unit_price'], $sale->id, $request->user()->id,
+                        branchId: $branchId,
                     );
                 } else {
                     $this->saleItems->sell(
@@ -81,6 +86,7 @@ class PosSaleController extends Controller
                         $sale->id,
                         createdBy: $request->user()->id,
                         variant: $variant,
+                        branchId: $branchId,
                     );
                 }
 

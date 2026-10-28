@@ -25,11 +25,11 @@ class SalesController extends Controller
         $shop = $this->shop($request);
         $this->authorizeAction($request, 'sales.view');
 
-        $done = fn () => Sale::where('shop_owner_id', $shop->id)->where('status', 'completed');
+        $done = fn () => $this->salesFor($request, $shop->id)->where('status', 'completed');
         $today = now()->startOfDay();
         $month = now()->startOfMonth();
 
-        $top = SaleItem::whereHas('sale', fn ($q) => $q->where('shop_owner_id', $shop->id)->where('status', 'completed'))
+        $top = SaleItem::whereHas('sale', fn ($q) => $this->salesFor($request, $shop->id, $q)->where('status', 'completed'))
             ->with('product:id,name')
             ->selectRaw('product_id, SUM(base_quantity) as total_quantity, SUM(quantity * unit_price) as total_revenue')
             ->groupBy('product_id')->orderByDesc('total_quantity')->limit(5)->get();
@@ -52,7 +52,7 @@ class SalesController extends Controller
         $shop = $this->shop($request);
         $this->authorizeAction($request, 'sales.view');
 
-        return Sale::where('shop_owner_id', $shop->id)
+        return $this->salesFor($request, $shop->id)
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->status))
             ->with(['items.product:id,name', 'createdBy:id,name'])
             ->latest('id')->paginate(20);
@@ -60,7 +60,7 @@ class SalesController extends Controller
 
     public function show(Request $request, Sale $sale)
     {
-        abort_unless($sale->shop_owner_id === $this->shop($request)->id, 404);
+        $sale = $this->salesFor($request, $this->shop($request)->id)->whereKey($sale->id)->firstOrFail();
         $this->authorizeAction($request, 'sales.view');
 
         return $sale->load(['items.product:id,name,sku', 'createdBy:id,name']);
@@ -69,13 +69,16 @@ class SalesController extends Controller
     public function void(Request $request, Sale $sale)
     {
         $shop = $this->shop($request);
-        abort_unless($sale->shop_owner_id === $shop->id, 404);
+        $branchId = $this->branchIdFor($request);
+        $sale = $this->salesFor($request, $shop->id)->whereKey($sale->id)->firstOrFail();
         $this->authorizeAction($request, 'sales.delete');
 
         $data = $request->validate(['reason' => 'required|string|max:255']);
 
-        DB::transaction(function () use ($sale, $data, $request) {
-            $locked = Sale::whereKey($sale->id)->lockForUpdate()->firstOrFail();
+        DB::transaction(function () use ($sale, $data, $request, $shop, $branchId) {
+            $locked = Sale::where('shop_owner_id', $shop->id)
+                ->when($branchId, fn ($query) => $query->where('branch_id', $branchId))
+                ->whereKey($sale->id)->lockForUpdate()->firstOrFail();
             abort_if($locked->status === 'voided', 409, 'This sale is already voided.');
             abort_if($locked->status !== 'completed', 422, 'Only completed sales can be voided.');
 
@@ -102,6 +105,7 @@ class SalesController extends Controller
                     $locked->id,
                     $request->user()->id,
                     $m->variant_id ? ProductVariant::withTrashed()->find($m->variant_id) : null,
+                    branchId: $locked->branch_id,
                 );
             }
 
@@ -114,5 +118,24 @@ class SalesController extends Controller
         });
 
         return response()->json($sale->fresh());
+    }
+
+    private function salesFor(Request $request, int $shopId, $query = null)
+    {
+        $query ??= Sale::query();
+        $query->where('shop_owner_id', $shopId);
+
+        if ($branchId = $this->branchIdFor($request)) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query;
+    }
+
+    private function branchIdFor(Request $request): ?int
+    {
+        $user = $request->user();
+
+        return $user->isBranchHead() ? (int) $user->staff->branch_id : null;
     }
 }

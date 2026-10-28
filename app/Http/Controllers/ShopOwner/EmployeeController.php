@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\Role;
 use App\Models\Staff;
+use App\Models\ShopOwner;
 use App\Models\User;
 use App\Traits\ResolvesShop;
 use Illuminate\Http\Request;
@@ -20,18 +21,36 @@ class EmployeeController extends Controller
 {
     use ResolvesShop;
 
+    private const DEFAULT_EMPLOYEE_PASSWORD = '12345678';
+
     public function index(Request $request)
     {
         $shop = $this->shop($request);
         app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
         $this->authorizeAction($request, 'employees.view');
+        $isBranchHead = $this->branchHeadFor($request, $shop);
 
         $query = Staff::with(['user.roles', 'branch'])
             ->where('shop_owner_id', $shop->id);
 
         $user = $request->user();
-        if ($user->isBranchHead() && $user->staff?->branch_id) {
+        if ($isBranchHead) {
             $query->where('branch_id', $user->staff->branch_id);
+        }
+
+        $filters = $request->validate([
+            'branch_id' => 'sometimes|integer',
+            'per_page' => 'sometimes|integer|min:1|max:100',
+        ]);
+        if (isset($filters['branch_id'])) {
+            abort_unless(
+                Branch::where('shop_owner_id', $shop->id)->whereKey($filters['branch_id'])->exists(),
+                404
+            );
+            if ($isBranchHead) {
+                abort_unless((int) $filters['branch_id'] === (int) $user->staff->branch_id, 404);
+            }
+            $query->where('branch_id', $filters['branch_id']);
         }
 
         if ($request->filled('role')) {
@@ -50,8 +69,8 @@ class EmployeeController extends Controller
         $shop->loadMissing('plan:id,max_staff');
 
         return response()->json([
-            'employees' => $query->latest()->paginate(20),
-            'quota' => [
+            'employees' => $query->latest()->paginate($filters['per_page'] ?? 20),
+            'quota' => $isBranchHead ? null : [
                 'used' => Staff::where('shop_owner_id', $shop->id)->count(),
                 'limit' => $shop->plan?->max_staff,
             ],
@@ -62,6 +81,7 @@ class EmployeeController extends Controller
     {
         $shop = $this->shop($request);
         $user = $request->user();
+        $isBranchHead = $this->branchHeadFor($request, $shop);
 
         $data = $request->validate([
             'name' => 'required|string|max:255',
@@ -77,21 +97,22 @@ class EmployeeController extends Controller
         }
 
         $role = Role::where('shop_owner_id', $shop->id)->findOrFail($data['role_id']);
+        abort_if($this->isBranchHeadRole($role), 403, 'Assign Branch Heads from the branch assignment form.');
         $this->assertCanGrant($request, $role);
 
         $branchId = $data['branch_id'] ?? null;
-        if ($user->isBranchHead() && $user->staff?->branch_id) {
+        if ($isBranchHead) {
             $branchId = $user->staff->branch_id;
         }
 
-        $temporary = Str::password(12, symbols: false);
+        $defaultPassword = self::DEFAULT_EMPLOYEE_PASSWORD;
 
-        $staff = DB::transaction(function () use ($data, $shop, $role, $branchId, $temporary) {
+        $staff = DB::transaction(function () use ($data, $shop, $role, $branchId, $defaultPassword) {
             $account = User::create([
                 'name' => $data['name'],
                 'username' => $this->uniqueUsername($data['name']),
                 'email' => $data['email'],
-                'password' => Hash::make($temporary),
+                'password' => Hash::make($defaultPassword),
                 'role' => 'staff',
             ]);
             $staff = Staff::create([
@@ -109,7 +130,7 @@ class EmployeeController extends Controller
 
         return response()->json([
             'message' => 'Employee added.',
-            'temporary_password' => $temporary,
+            'default_password' => $defaultPassword,
             'staff' => $staff->load('user.roles', 'branch'),
         ], 201);
     }
@@ -119,6 +140,10 @@ class EmployeeController extends Controller
         $shop = $this->shop($request);
         abort_unless($staff->shop_owner_id === $shop->id, 404);
         $this->authorizeAction($request, 'employees.edit');
+        $isBranchHead = $this->branchHeadFor($request, $shop);
+        if ($isBranchHead) {
+            abort_unless((int) $staff->branch_id === (int) $request->user()->staff->branch_id, 404);
+        }
 
         $data = $request->validate([
             'name' => 'sometimes|string|max:255',
@@ -133,24 +158,40 @@ class EmployeeController extends Controller
             403,
             "You can't change your own role or status."
         );
-        if ($request->user()->isBranchHead()) {
+        if ($isBranchHead) {
             unset($data['branch_id']);
         }
 
-        DB::transaction(function () use ($data, $staff, $shop, $request) {
-            if (isset($data['name'])) {
-                $staff->user->update(['name' => $data['name']]);
+        DB::transaction(function () use ($data, $staff, $shop, $request, $isBranchHead) {
+            $lockedStaff = Staff::whereKey($staff->id)->lockForUpdate()->firstOrFail();
+            app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+            $lockedStaff->load('user');
+            $lockedStaff->user->unsetRelation('roles')->unsetRelation('permissions');
+            $hasBranchHeadRole = $lockedStaff->user->hasAnyRole(['Branch Head', 'branch_head']);
+            $isAssignedBranchHead = Branch::where('shop_owner_id', $shop->id)
+                ->where('head_staff_id', $lockedStaff->id)
+                ->exists();
+
+            if (($hasBranchHeadRole || $isAssignedBranchHead)
+                && (array_key_exists('role_id', $data)
+                    || array_key_exists('branch_id', $data)
+                    || ($data['status'] ?? null) === 'inactive')) {
+                abort(403, 'Unassign the Branch Head from the branch form before changing their role, branch, or status.');
             }
-            $staff->update(Arr::only($data, ['phone', 'branch_id', 'status']));
+
+            if (isset($data['name'])) {
+                $lockedStaff->user->update(['name' => $data['name']]);
+            }
+            $lockedStaff->update(Arr::only($data, ['phone', 'branch_id', 'status']));
             if (($data['status'] ?? null) === 'inactive') {
-                $staff->user->tokens()->delete();
+                $lockedStaff->user->tokens()->delete();
             }
 
             if (isset($data['role_id'])) {
-                app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
                 $role = Role::where('shop_owner_id', $shop->id)->findOrFail($data['role_id']);
+                abort_if($this->isBranchHeadRole($role), 403, 'Assign Branch Heads from the branch assignment form.');
                 $this->assertCanGrant($request, $role);
-                $staff->user->unsetRelation('roles')->syncRoles([$role]);
+                $lockedStaff->user->unsetRelation('roles')->syncRoles([$role]);
             }
         });
 
@@ -165,6 +206,20 @@ class EmployeeController extends Controller
         $shop = $this->shop($request);
         abort_unless($staff->shop_owner_id === $shop->id, 404);
         $this->authorizeAction($request, 'employees.delete');
+        $isBranchHead = $this->branchHeadFor($request, $shop);
+        if ($isBranchHead) {
+            abort_unless((int) $staff->branch_id === (int) $request->user()->staff->branch_id, 404);
+        }
+
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+        $staff->load('user');
+        $staff->user->unsetRelation('roles')->unsetRelation('permissions');
+        abort_if(
+            $staff->user->hasAnyRole(['Branch Head', 'branch_head'])
+                || Branch::where('shop_owner_id', $shop->id)->where('head_staff_id', $staff->id)->exists(),
+            403,
+            'Unassign the Branch Head from the branch form before deactivating them.'
+        );
 
         abort_if($staff->user_id === $request->user()->id, 422, "You can't remove your own account.");
 
@@ -172,6 +227,29 @@ class EmployeeController extends Controller
         $staff->user->tokens()->delete();
 
         return response()->json(['message' => 'Employee deactivated. Their sales and history are kept.']);
+    }
+
+    private function branchHeadFor(Request $request, ShopOwner $shop): bool
+    {
+        $user = $request->user();
+        if ($user->isShopOwner() || $user->isSuperAdmin()) {
+            return false;
+        }
+
+        app(PermissionRegistrar::class)->setPermissionsTeamId($shop->id);
+        $user->unsetRelation('roles')->unsetRelation('permissions');
+        $hasBranchHeadRole = $user->hasAnyRole(['Branch Head', 'branch_head']);
+
+        if ($hasBranchHeadRole) {
+            abort_unless($user->isBranchHead(), 403, 'A valid branch-head assignment is required.');
+        }
+
+        return $hasBranchHeadRole;
+    }
+
+    private function isBranchHeadRole(Role $role): bool
+    {
+        return in_array(strtolower($role->name), ['branch head', 'branch_head'], true);
     }
 
     private function uniqueUsername(string $name): string

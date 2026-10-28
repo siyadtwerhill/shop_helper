@@ -23,18 +23,22 @@ class InventoryMovementController extends Controller
     {
         $this->ownedProduct($request, $product);
 
-        return $product->inventoryMovements()
+        $query = $product->inventoryMovements()
             ->with(['unit', 'creator:id,name'])
-            ->when($request->filled('variant_id'), fn ($q) => $q->where('variant_id', $request->variant_id))
-            ->latest('id')
-            ->paginate(25);
+            ->when($request->filled('variant_id'), fn ($q) => $q->where('variant_id', $request->variant_id));
+
+        if ($request->user()->isBranchHead()) {
+            $query->where('branch_id', $request->user()->staff->branch_id);
+        }
+
+        return $query->latest('id')->paginate(25);
     }
 
     /** Manual stock correction (e.g. stocktake found a discrepancy). Quantity is signed. */
     public function store(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'inventory.stock.edit');
 
         abort_if($product->stock_mode === 'from_components', 422, 'Bundle stock is calculated from its components.');
 
@@ -62,6 +66,7 @@ class InventoryMovementController extends Controller
             createdBy: $request->user()->id,
             note: $data['note'] ?? null,
             variant: $variant,
+            branchId: $request->user()->isBranchHead() ? (int) $request->user()->staff->branch_id : null,
         );
 
         $this->activity->log($product, 'stock_adjusted', $request->user()->id, description: "Stock adjusted by {$data['quantity']}");

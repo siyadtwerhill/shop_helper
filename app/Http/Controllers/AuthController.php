@@ -44,7 +44,7 @@ class AuthController extends Controller
         // login, without a second request. Whichever path doesn't apply
         // to this user's role just resolves to null.
         $user = User::where('email', $request->email)
-            ->with(['shopOwner.plan', 'staff.shopOwner.plan'])
+            ->with(['shopOwner.plan', 'staff.branch', 'staff.shopOwner.plan'])
             ->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
@@ -71,6 +71,8 @@ class AuthController extends Controller
                 app(PermissionRegistrar::class)->setPermissionsTeamId($shopId);
             }
             $userData['permissions'] = $user->getAllPermissions()->pluck('name')->toArray();
+            $userData['branch'] = $user->branchHeadContext();
+            $userData['is_branch_head'] = $userData['branch'] !== null;
         } else {
             // Shop owners and superadmins have all permissions
             $userData['permissions'] = [];

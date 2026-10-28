@@ -34,6 +34,10 @@ class RequirePermission
         // Clear cached relations so the correct team's roles are used.
         $user->unsetRelation('roles')->unsetRelation('permissions');
 
+        // A Branch Head role without a matching active branch assignment must
+        // not fall through as ordinary staff with elevated branch permissions.
+        abort_if($user->hasAnyRole(['Branch Head', 'branch_head']) && ! $user->isBranchHead(), 403, 'Branch Head assignment is invalid.');
+
         abort_unless($user->can($permission), 403, 'You do not have permission to do this.');
 
         return $next($request);

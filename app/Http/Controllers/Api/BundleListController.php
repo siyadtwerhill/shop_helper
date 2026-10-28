@@ -14,19 +14,12 @@ class BundleListController extends Controller
 
     public function __construct(private ProductStockService $stock) {}
 
-    /** All bundles across the shop, with branch filtering for branch heads. */
+    /** Bundle definitions are part of the shared shop catalog. */
     public function index(Request $request)
     {
         $shop = $this->shop($request);
-        $user = $request->user();
 
-        $bundles = ProductBundle::whereHas('product', function ($q) use ($shop, $user) {
-                $q->where('shop_owner_id', $shop->id);
-                if ($user->isBranchHead() && $user->staff?->branch_id) {
-                    $bid = $user->staff->branch_id;
-                    $q->where(fn ($b) => $b->where('branch_id', $bid)->orWhereNull('branch_id'));
-                }
-            })
+        $bundles = ProductBundle::whereHas('product', fn ($q) => $q->where('shop_owner_id', $shop->id))
             ->with([
                 'product:id,name,sku,status,image_path,branch_id',
                 'items.component:id,name,current_stock',

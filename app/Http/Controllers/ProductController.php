@@ -43,7 +43,6 @@ class ProductController extends Controller
     public function index(Request $request)
     {
         $shop = $this->shop($request);
-        $user = $request->user();
 
         $query = Product::where('shop_owner_id', $shop->id)
             ->with(['category:id,name', 'brand:id,name', 'barcodes', 'baseUnit.unit', 'branch:id,name', 'blueprint:id,name,capabilities',
@@ -54,12 +53,6 @@ class ProductController extends Controller
 
         if ($request->input('status') === 'archived') {
             $query->withTrashed();
-        }
-
-        // Branch heads see their branch plus shop-wide products.
-        if ($user->isBranchHead() && $user->staff?->branch_id) {
-            $branchId = $user->staff->branch_id;
-            $query->where(fn ($q) => $q->where('branch_id', $branchId)->orWhereNull('branch_id'));
         }
 
         if ($request->filled('search')) {
