@@ -69,9 +69,11 @@ class SalesController extends Controller
     public function void(Request $request, Sale $sale)
     {
         $shop = $this->shop($request);
-        $branchId = $this->branchIdFor($request);
+        $branchId = $this->branchIdFor($request, (int) $shop->id);
         $sale = $this->salesFor($request, $shop->id)->whereKey($sale->id)->firstOrFail();
-        $this->authorizeAction($request, 'sales.delete');
+        $this->authorizeAction($request, 'sales.refunds.create');
+
+        abort_if($sale->branch_id === null, 422, 'This historical sale has no branch attribution, so its stock cannot be safely returned to a branch.');
 
         $data = $request->validate(['reason' => 'required|string|max:255']);
 
@@ -125,17 +127,27 @@ class SalesController extends Controller
         $query ??= Sale::query();
         $query->where('shop_owner_id', $shopId);
 
-        if ($branchId = $this->branchIdFor($request)) {
+        if ($branchId = $this->branchIdFor($request, $shopId)) {
             $query->where('branch_id', $branchId);
         }
 
         return $query;
     }
 
-    private function branchIdFor(Request $request): ?int
+    private function branchIdFor(Request $request, int $shopId): ?int
     {
         $user = $request->user();
 
-        return $user->isBranchHead() ? (int) $user->staff->branch_id : null;
+        if (! $user->isBranchHead()) return null;
+
+        $branchId = $user->staff?->branch_id;
+        abort_if(! $branchId, 403, 'Your Branch Head assignment is missing. Contact the shop owner.');
+        abort_unless(
+            DB::table('branches')->where('id', $branchId)->where('shop_owner_id', $shopId)->where('is_active', true)->exists(),
+            403,
+            'Your assigned branch is unavailable. Contact the shop owner.'
+        );
+
+        return (int) $branchId;
     }
 }

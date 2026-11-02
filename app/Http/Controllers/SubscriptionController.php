@@ -11,6 +11,8 @@ class SubscriptionController extends Controller
 {
     private function shop(Request $request)
     {
+        abort_unless($request->user()->isShopOwner(), 403, 'Only the shop owner can manage subscriptions.');
+
         return $request->user()->shopOwner;
     }
 

@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Unit;
-use App\Models\SaleItem;
 use App\Services\BundleService;
 use App\Services\ProductActivityLogger;
 use App\Services\ProductStockService;
@@ -26,7 +25,9 @@ class ProductBundleController extends Controller
     public function show(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
-        return $this->payload($product);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id);
+        $this->stock->assertVisibleAtBranch($product, $branchId);
+        return $this->payload($product, 200, $branchId);
     }
 
     /** Turns an unused plain product into a bundle (new bundles are normally created via ProductController::store). */
@@ -34,7 +35,8 @@ class ProductBundleController extends Controller
     {
         $shop = $this->shop($request);
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.bundles.create');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $shop->id));
         abort_if($product->bundle()->exists(), 409, 'This product is already a bundle.');
 
         $data = $this->validated($request);
@@ -58,7 +60,8 @@ class ProductBundleController extends Controller
             $this->activity->log($locked, 'bundle_created', $request->user()->id, description: count($rows) . ' components');
         });
 
-        return $this->payload($product->fresh(), 201);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id);
+        return $this->payload($product->fresh(), 201, $branchId);
     }
 
     /** Price and/or components. Omit "items" to change only the price. */
@@ -66,7 +69,8 @@ class ProductBundleController extends Controller
     {
         $shop = $this->shop($request);
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.bundles.edit');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $shop->id));
         $bundle = $product->bundle()->firstOrFail();
 
         $data = $this->validated($request, itemsRequired: false);
@@ -89,20 +93,17 @@ class ProductBundleController extends Controller
             $this->activity->log($locked, 'bundle_updated', $request->user()->id);
         });
 
-        return $this->payload($product->fresh());
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id);
+        return $this->payload($product->fresh(), 200, $branchId);
     }
 
     public function destroy(Request $request, Product $product)
     {
+        $shop = $this->shop($request);
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.delete');
+        $this->authorizeAction($request, 'products.bundles.delete');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $shop->id));
         $bundle = $product->bundle()->firstOrFail();
-
-        abort_if(
-            SaleItem::where('product_id', $product->id)->exists(),
-            422,
-            "This bundle has been sold, so its product can't be removed. Mark it inactive instead."
-        );
 
         DB::transaction(function () use ($product, $bundle, $request) {
             $bundle->items()->delete();
@@ -110,6 +111,8 @@ class ProductBundleController extends Controller
             $product->forceFill(['product_type' => 'neutral', 'stock_mode' => 'own'])->save();
             $product->update(['status' => 'archived', 'updated_by' => $request->user()->id]);
             $this->activity->log($product, 'archived', $request->user()->id);
+            // Product uses SoftDeletes, so sale_items can keep their product
+            // reference and the historical bundle name and sale-time prices.
             $product->delete();
         });
 
@@ -128,10 +131,10 @@ class ProductBundleController extends Controller
         ]);
     }
 
-    private function payload(Product $product, int $status = 200)
+    private function payload(Product $product, int $status = 200, ?int $branchId = null)
     {
         $bundle = $product->bundle()->with([
-            'items.component:id,name,sku,status,stock_mode,cost_price,current_stock',
+            'items.component:id,name,sku,status,shop_owner_id,stock_mode,cost_price',
             'items.component.units.unit',
             'items.component.variants',
             'items.unit.unit',
@@ -141,9 +144,10 @@ class ProductBundleController extends Controller
         if (! $bundle) return response()->json(['bundle' => null]);
 
         $components = $bundle->items->pluck('component')->filter();
-        $this->stock->hydrate($components);
+        $this->stock->hydrate($components, $branchId);
         $variantStocks = $this->stock->variantStocks(
-            $components->flatMap(fn ($component) => $component->variants->pluck('id'))->all()
+            $components->flatMap(fn ($component) => $component->variants->pluck('id'))->all(),
+            $branchId
         );
         foreach ($components as $component) {
             foreach ($component->variants as $variant) {
@@ -154,7 +158,7 @@ class ProductBundleController extends Controller
         return response()->json([
             'bundle'          => $bundle,
             'summary'         => $this->bundles->summary($bundle),
-            'available_stock' => $this->stock->bundleAvailableFor($bundle),
+            'available_stock' => $this->stock->bundleAvailableFor($bundle, $branchId),
         ], $status);
     }
 

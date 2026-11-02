@@ -42,7 +42,8 @@ class BranchHeadRoleSeeder extends Seeder
             // Default Branch Head permissions (approved set)
             $defaultPermissions = [
                 'products.view',
-                'sales.pos',
+                'sales.pos.view',
+                'sales.pos.create',
                 'inventory.stock.view',
                 'employees.view',
                 'branches.view',
@@ -54,9 +55,10 @@ class BranchHeadRoleSeeder extends Seeder
                 ->pluck('id')
                 ->toArray();
 
-            // Sync permissions (this will add missing ones, keep existing ones)
+            // Keep default POS access present without removing any additional
+            // permissions configured for this shop's system role.
             if (!empty($permissionIds)) {
-                $branchHeadRole->syncPermissions($permissionIds);
+                $branchHeadRole->givePermissionTo($permissionIds);
             }
         }
 

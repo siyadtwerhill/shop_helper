@@ -29,7 +29,7 @@ class ProductUnitController extends Controller
     public function store(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.units.create');
 
         $data = $request->validate([
             // Prevent duplicate unit on the same product (would 500 on the DB unique index).
@@ -59,7 +59,7 @@ class ProductUnitController extends Controller
     public function update(Request $request, Product $product, ProductUnit $productUnit)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.units.edit');
         abort_if($productUnit->product_id !== $product->id, 404);
 
         $data = $request->validate([
@@ -87,7 +87,7 @@ class ProductUnitController extends Controller
     public function destroy(Request $request, Product $product, ProductUnit $productUnit)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.units.delete');
         abort_if($productUnit->product_id !== $product->id, 404);
         abort_if($productUnit->is_base, 409, 'Cannot delete the base unit. Assign a new base unit first.');
 

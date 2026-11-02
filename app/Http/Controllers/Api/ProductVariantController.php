@@ -25,14 +25,18 @@ class ProductVariantController extends Controller
     public function index(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id);
+        $this->stock->assertVisibleAtBranch($product, $branchId);
 
-        return $this->withStock($product->variants()->with('barcodes')->orderBy('id')->get());
+        return $this->withStock($product->variants()->with('barcodes')->orderBy('id')->get(), $branchId);
     }
 
     /** Variant options (axes), price policy, and unassigned stock — for the variant screen. */
     public function axes(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id);
+        $this->stock->assertVisibleAtBranch($product, $branchId);
 
         $bp = $this->variants->blueprintFor($product);
 
@@ -42,7 +46,7 @@ class ProductVariantController extends Controller
             'axes'              => $this->variants->axesFor($product),
             'price_per_variant' => (bool) (($bp->pricing_policy ?? [])['price_per_variant'] ?? false),
             'unassigned_stock'  => $product->stock_mode === 'from_variants'
-                ? $this->stock->unassignedFor($product) : '0.0000',
+                ? $this->stock->unassignedFor($product, $branchId) : '0.0000',
         ]);
     }
 
@@ -50,7 +54,8 @@ class ProductVariantController extends Controller
     public function store(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.variants.create');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $product->shop_owner_id));
 
         $data = $request->validate([
             'sku'           => ['nullable', 'regex:/^[A-Za-z0-9._-]{1,60}$/'],
@@ -59,6 +64,7 @@ class ProductVariantController extends Controller
             'purchase_price'=> 'nullable|numeric|min:0',
             'barcode'       => 'nullable|string|max:64',
             'opening_stock' => 'nullable|numeric|min:0',
+            'branch_id'     => 'nullable|integer',
             'image'         => 'nullable|image|max:2048',
         ]);
 
@@ -67,19 +73,23 @@ class ProductVariantController extends Controller
         }
         unset($data['image']);
 
-        $result = $this->variants->createMany($product, [$data], $request->user()->id);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id,
+            required: (float) ($data['opening_stock'] ?? 0) > 0,
+            requestedBranchId: isset($data['branch_id']) ? (int) $data['branch_id'] : null);
+        $result = $this->variants->createMany($product, [$data], $request->user()->id, branchId: $branchId);
 
         $variants = collect($result['created']);
         $variants->each(fn ($variant) => $variant->load('barcodes'));
 
-        return response()->json($this->withStock($variants)->first(), 201);
+        return response()->json($this->withStock($variants, $branchId)->first(), 201);
     }
 
     /** The grid: many variants in one request, all or nothing. */
     public function bulk(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.variants.create');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $product->shop_owner_id));
 
         $data = $request->validate([
             'skip_existing'              => 'sometimes|boolean',
@@ -90,20 +100,27 @@ class ProductVariantController extends Controller
             'variants.*.purchase_price'  => 'nullable|numeric|min:0',
             'variants.*.barcode'         => 'nullable|string|max:64',
             'variants.*.opening_stock'   => 'nullable|numeric|min:0',
+            'branch_id'                 => 'nullable|integer',
         ]);
+
+        $hasOpeningStock = collect($data['variants'])->contains(fn ($variant) => (float) ($variant['opening_stock'] ?? 0) > 0);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id,
+            required: $hasOpeningStock,
+            requestedBranchId: isset($data['branch_id']) ? (int) $data['branch_id'] : null);
 
         $result = $this->variants->createMany(
             $product,
             $data['variants'],
             $request->user()->id,
-            (bool) ($data['skip_existing'] ?? false)
+            (bool) ($data['skip_existing'] ?? false),
+            branchId: $branchId
         );
 
         $created = collect($result['created']);
         $created->each(fn ($variant) => $variant->load('barcodes'));
 
         return response()->json([
-            'created' => $this->withStock($created),
+            'created' => $this->withStock($created, $branchId),
             'skipped' => $result['skipped'],
         ], 201);
     }
@@ -111,7 +128,9 @@ class ProductVariantController extends Controller
     public function update(Request $request, Product $product, $variantId)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.variants.edit');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $product->shop_owner_id));
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id);
         $variant = ProductVariant::where('product_id', $product->id)->findOrFail($variantId);
 
         $data = $request->validate([
@@ -135,14 +154,15 @@ class ProductVariantController extends Controller
         $variant = $this->variants->updateVariant($product, $variant, $data);
 
         return response()->json(
-            $this->withStock(collect([$variant->load('barcodes')]))->first()
+            $this->withStock(collect([$variant->load('barcodes')]), $branchId)->first()
         );
     }
 
     public function destroy(Request $request, Product $product, $variantId)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.variants.delete');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $product->shop_owner_id));
         $variant = ProductVariant::where('product_id', $product->id)->findOrFail($variantId);
 
         $this->variants->removeVariant($product, $variant, $request->user()->id);
@@ -154,24 +174,29 @@ class ProductVariantController extends Controller
     public function assignStock(Request $request, Product $product, $variantId)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.variants.edit');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $product->shop_owner_id));
         $variant = ProductVariant::where('product_id', $product->id)->findOrFail($variantId);
 
         $data = $request->validate([
             'quantity' => ['required', 'regex:/^\d{1,11}(\.\d{1,4})?$/'],
+            'branch_id' => 'nullable|integer',
         ]);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id,
+            required: true,
+            requestedBranchId: isset($data['branch_id']) ? (int) $data['branch_id'] : null);
 
-        $this->movements->assignUnassignedStock($product, $variant, $data['quantity'], $request->user()->id);
+        $this->movements->assignUnassignedStock($product, $variant, $data['quantity'], $request->user()->id, branchId: $branchId);
 
         return response()->json([
-            'unassigned_stock' => $this->stock->unassignedFor($product->fresh()),
+            'unassigned_stock' => $this->stock->unassignedFor($product->fresh(), $branchId),
         ]);
     }
 
     /** One grouped query instead of one per variant. */
-    private function withStock($variants)
+    private function withStock($variants, ?int $branchId = null)
     {
-        $stocks = $this->stock->variantStocks($variants->pluck('id')->all());
+        $stocks = $this->stock->variantStocks($variants->pluck('id')->all(), $branchId);
         foreach ($variants as $v) {
             $v->setAttribute('current_stock', $stocks[$v->id] ?? '0.0000');
         }

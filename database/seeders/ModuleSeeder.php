@@ -14,9 +14,10 @@ class ModuleSeeder extends Seeder
             ['name' => 'Employees', 'slug' => 'employees', 'icon' => 'users', 'description' => 'Employee management', 'sort_order' => 1, 'is_active' => true],
             ['name' => 'Branches', 'slug' => 'branches', 'icon' => 'building', 'description' => 'Branch management', 'sort_order' => 2, 'is_active' => true],
             ['name' => 'Products', 'slug' => 'products', 'icon' => 'box', 'description' => 'Product management', 'sort_order' => 3, 'is_active' => true],
-            ['name' => 'Sales', 'slug' => 'sales', 'icon' => 'shopping-cart', 'description' => 'Sales management', 'sort_order' => 4, 'is_active' => true],
-            ['name' => 'Customers', 'slug' => 'customers', 'icon' => 'users', 'description' => 'Customer management', 'sort_order' => 5, 'is_active' => true],
-            ['name' => 'Expenses', 'slug' => 'expenses', 'icon' => 'receipt', 'description' => 'Expense management', 'sort_order' => 6, 'is_active' => true],
+            ['name' => 'Inventory', 'slug' => 'inventory', 'icon' => 'boxes', 'description' => 'Warehouses, transfers, and purchasing', 'sort_order' => 4, 'is_active' => true],
+            ['name' => 'Sales', 'slug' => 'sales', 'icon' => 'shopping-cart', 'description' => 'Sales management', 'sort_order' => 5, 'is_active' => true],
+            ['name' => 'Customers', 'slug' => 'customers', 'icon' => 'users', 'description' => 'Customer management', 'sort_order' => 6, 'is_active' => true],
+            ['name' => 'Expenses', 'slug' => 'expenses', 'icon' => 'receipt', 'description' => 'Expense management', 'sort_order' => 7, 'is_active' => true],
         ];
 
         $createdModules = [];
@@ -56,6 +57,7 @@ class ModuleSeeder extends Seeder
             $createdModules['employees']->id,
             $createdModules['branches']->id,
             $createdModules['products']->id,
+            $createdModules['inventory']->id,
             $createdModules['sales']->id,
             $createdModules['customers']->id,
         ]);
@@ -64,6 +66,7 @@ class ModuleSeeder extends Seeder
             $createdModules['employees']->id,
             $createdModules['branches']->id,
             $createdModules['products']->id,
+            $createdModules['inventory']->id,
             $createdModules['sales']->id,
             $createdModules['customers']->id,
             $createdModules['expenses']->id,

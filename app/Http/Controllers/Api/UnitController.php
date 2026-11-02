@@ -5,13 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Unit;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 
 class UnitController extends Controller
 {
     public function index(Request $request)
     {
-        $shopOwnerId = $request->user()->shopOwner->id;
+        $shopOwnerId = $this->shopOwnerId($request);
 
         return Unit::availableTo($shopOwnerId)
             ->orderBy('is_system', 'desc')
@@ -27,7 +26,7 @@ class UnitController extends Controller
             'type' => 'required|in:weight,volume,length,quantity,packaging',
         ]);
 
-        $data['shop_owner_id'] = $request->user()->shopOwner->id;
+        $data['shop_owner_id'] = $this->shopOwnerId($request);
         $data['is_system'] = false;
 
         $unit = Unit::create($data);
@@ -38,7 +37,7 @@ class UnitController extends Controller
     public function update(Request $request, Unit $unit)
     {
         abort_if($unit->is_system, 403, 'System units cannot be edited.');
-        abort_if($unit->shop_owner_id !== $request->user()->shopOwner->id, 403);
+        abort_if($unit->shop_owner_id !== $this->shopOwnerId($request), 403);
 
         $data = $request->validate([
             'name' => 'sometimes|string|max:100',
@@ -54,11 +53,19 @@ class UnitController extends Controller
     public function destroy(Request $request, Unit $unit)
     {
         abort_if($unit->is_system, 403, 'System units cannot be deleted.');
-        abort_if($unit->shop_owner_id !== $request->user()->shopOwner->id, 403);
+        abort_if($unit->shop_owner_id !== $this->shopOwnerId($request), 403);
         abort_if($unit->productUnits()->exists(), 409, 'Unit is still in use on a product.');
 
         $unit->delete();
 
         return response()->json(null, 204);
+    }
+
+    private function shopOwnerId(Request $request): int
+    {
+        $shop = $request->user()->shopOwner ?? $request->user()->staff?->shopOwner;
+        abort_unless($shop, 403, 'No shop is linked to this account.');
+
+        return (int) $shop->id;
     }
 }

@@ -22,6 +22,11 @@ use App\Http\Controllers\Api\BundleListController;
 use App\Http\Controllers\Api\PosSaleController;
 use App\Http\Controllers\Api\SalesController;
 use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\WarehouseController;
+use App\Http\Controllers\Api\SupplierController;
+use App\Http\Controllers\Api\PurchaseController;
+use App\Http\Controllers\Api\StockTransferController;
+use App\Services\BranchModeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\FeatureController;
@@ -42,9 +47,9 @@ Route::middleware(['auth:sanctum', 'active'])->get('/user', function (Request $r
     // .plan is nested on so the frontend can show the shop's plan name
     // (e.g. on the profile page) without a second request.
     if ($user->role === 'shop_owner') {
-        $user->load(['shopOwner.plan', 'shopOwner.subscription.plan']);
+        $user->load(['shopOwner.plan.modules', 'shopOwner.subscription.plan']);
     } elseif ($user->role === 'staff') {
-        $user->load(['staff.branch', 'staff.shopOwner.plan', 'staff.shopOwner.subscription.plan']);
+        $user->load(['staff.branch', 'staff.shopOwner.plan.modules', 'staff.shopOwner.subscription.plan']);
     }
 
     // Add permissions to the user response
@@ -67,6 +72,11 @@ Route::middleware(['auth:sanctum', 'active'])->get('/user', function (Request $r
     } elseif ($user->role === 'staff') {
         $userData['staff'] = $user->staff;
     }
+
+    $shop = $user->shopOwner ?? $user->staff?->shopOwner;
+    $userData['inventory_logistics_enabled'] = $shop
+        ? app(BranchModeService::class)->inventoryLogisticsEnabledFor($shop)
+        : false;
 
     return $userData;
 });
@@ -130,6 +140,30 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::middleware('can.perm:branches.edit')->put('/branches/{branch}', [BranchController::class, 'update']);
     Route::middleware('can.perm:branches.delete')->delete('/branches/{branch}', [BranchController::class, 'destroy']);
 
+    // ---- Warehouses, purchasing, and inter-location stock transfers ----
+    Route::middleware('can.perm:inventory.warehouses.view')->get('/warehouses', [WarehouseController::class, 'index']);
+    Route::middleware('can.perm:inventory.warehouses.view')->get('/warehouses/{warehouse}/stocks', [WarehouseController::class, 'stocks']);
+    Route::middleware('can.perm:inventory.warehouses.view')->get('/warehouses/{warehouse}/movements', [WarehouseController::class, 'movements']);
+    Route::middleware('can.perm:inventory.warehouses.create')->post('/warehouses', [WarehouseController::class, 'store']);
+    Route::middleware('can.perm:inventory.warehouses.edit')->put('/warehouses/{warehouse}', [WarehouseController::class, 'update']);
+    Route::middleware('can.perm:inventory.warehouses.delete')->delete('/warehouses/{warehouse}', [WarehouseController::class, 'destroy']);
+
+    Route::middleware('can.perm:suppliers.view')->get('/suppliers', [SupplierController::class, 'index']);
+    Route::middleware('can.perm:suppliers.create')->post('/suppliers', [SupplierController::class, 'store']);
+    Route::middleware('can.perm:suppliers.edit')->put('/suppliers/{supplier}', [SupplierController::class, 'update']);
+    Route::middleware('can.perm:suppliers.delete')->delete('/suppliers/{supplier}', [SupplierController::class, 'destroy']);
+
+    Route::middleware('can.perm:inventory.purchases.view')->get('/purchases', [PurchaseController::class, 'index']);
+    Route::middleware('can.perm:inventory.purchases.create')->post('/purchases', [PurchaseController::class, 'store']);
+    Route::middleware('can.perm:inventory.purchases.edit')->post('/purchases/{purchase}/receive', [PurchaseController::class, 'receive']);
+    Route::middleware('can.perm:inventory.purchases.delete')->delete('/purchases/{purchase}', [PurchaseController::class, 'destroy']);
+
+    Route::middleware('can.perm:inventory.transfers.view')->get('/stock-transfers', [StockTransferController::class, 'index']);
+    Route::middleware('can.perm:inventory.transfers.create')->post('/stock-transfers', [StockTransferController::class, 'store']);
+    Route::middleware('can.perm:inventory.transfers.edit')->post('/stock-transfers/{transfer}/dispatch', [StockTransferController::class, 'dispatch']);
+    Route::middleware('can.perm:inventory.transfers.edit')->post('/stock-transfers/{transfer}/receive', [StockTransferController::class, 'receive']);
+    Route::middleware('can.perm:inventory.transfers.delete')->post('/stock-transfers/{transfer}/cancel', [StockTransferController::class, 'cancel']);
+
     // ---- Products, Categories, Brands ----
     Route::middleware('can.perm:products.view')->group(function () {
         Route::get('/products', [ProductController::class, 'index']);
@@ -137,6 +171,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/products/lookup-barcode', [ProductController::class, 'lookupByBarcode']);
     });
     Route::middleware('can.perm:products.create')->post('/products', [ProductController::class, 'store']);
+    Route::middleware('can.perm:products.bundles.create')->post('/products/bundles', [ProductController::class, 'store']);
     Route::middleware('can.perm:products.edit')->group(function () {
         // POST is accepted so multipart FormData from the edit screen can be parsed
         // (PHP does not populate files/input on a real PUT).
@@ -171,10 +206,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::middleware('can.perm:products.delete')->apiResource('brands', BrandController::class)->only(['destroy']);
 
     // ---- Units & Product Units ----
-    Route::middleware('can.perm:products.units.view')->apiResource('units', UnitController::class)->except(['show']);
-    Route::middleware('can.perm:products.units.create')->apiResource('units', UnitController::class)->only(['store']);
-    Route::middleware('can.perm:products.units.edit')->apiResource('units', UnitController::class)->only(['update']);
-    Route::middleware('can.perm:products.units.delete')->apiResource('units', UnitController::class)->only(['destroy']);
+    // Product forms need to read available units, but product CRUD must not
+    // require the separate permission to manage the unit catalog.
+    Route::middleware('can.perm:products.units.view|products.view|products.create|products.edit|products.bundles.create')->get('/units', [UnitController::class, 'index']);
+    Route::middleware('can.perm:products.units.create')->post('/units', [UnitController::class, 'store']);
+    Route::middleware('can.perm:products.units.edit')->put('/units/{unit}', [UnitController::class, 'update']);
+    Route::middleware('can.perm:products.units.delete')->delete('/units/{unit}', [UnitController::class, 'destroy']);
 
     Route::middleware('can.perm:products.units.view')->get('products/{product}/units', [ProductUnitController::class, 'index']);
     Route::middleware('can.perm:products.units.create')->post('products/{product}/units', [ProductUnitController::class, 'store']);
@@ -188,7 +225,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::middleware('can.perm:inventory.stock.edit')->post('products/{product}/movements', [InventoryMovementController::class, 'store']);
 
     // ---- Pricing ----
-    Route::middleware('can.perm:products.pricing.view')->post('pos/price-quote', [PriceQuoteController::class, 'store']);
+    Route::middleware('can.perm:sales.pos.view|sales.pos.create')->post('pos/price-quote', [PriceQuoteController::class, 'store']);
 
     Route::middleware('can.perm:products.pricing.view')->get('products/{product}/price-rules', [ProductPriceRuleController::class, 'index']);
     Route::middleware('can.perm:products.pricing.create')->post('products/{product}/price-rules', [ProductPriceRuleController::class, 'store']);
@@ -232,7 +269,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::middleware('can.perm:products.bundles.view')->get('bundles', [BundleListController::class, 'index']);
 
     // ---- POS Sales ----
-    Route::middleware('can.perm:sales.pos')->post('pos/sales', [PosSaleController::class, 'store']);
+    Route::middleware('can.perm:sales.pos.create')->post('pos/sales', [PosSaleController::class, 'store']);
 
     // ---- Sales ----
     Route::middleware('can.perm:sales.view')->group(function () {
@@ -240,7 +277,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('sales', [SalesController::class, 'index']);
         Route::get('sales/{sale}', [SalesController::class, 'show']);
     });
-    Route::middleware('can.perm:sales.refunds')->post('sales/{sale}/void', [SalesController::class, 'void']);
+    Route::middleware('can.perm:sales.refunds.create')->post('sales/{sale}/void', [SalesController::class, 'void']);
 
     // ---- Customers ----
     Route::middleware('can.perm:customers.view')->apiResource('customers', CustomerController::class)->only(['index', 'show']);

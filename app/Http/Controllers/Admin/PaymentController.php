@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\SubscriptionChange;
+use App\Services\BranchModeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -66,6 +67,7 @@ class PaymentController extends Controller
             }
 
             $shop->update(['plan_id' => $payment->plan_id]);
+            app(BranchModeService::class)->ensureInitialBranch($shop->fresh('plan'));
 
             SubscriptionChange::create([
                 'subscription_id' => $subscription->id,

@@ -28,7 +28,7 @@ class SalesControllerTest extends TestCase
         $shop->save();
         $branchA = Branch::factory()->create(['shop_owner_id' => $shop->id]);
         $branchB = Branch::factory()->create(['shop_owner_id' => $shop->id]);
-        $headA = $this->makeBranchHead($shop, $branchA, 'head-a@example.com', ['sales.view', 'sales.delete', 'sales.refunds']);
+        $headA = $this->makeBranchHead($shop, $branchA, 'head-a@example.com', ['sales.view', 'sales.refunds.create']);
 
         $saleA = Sale::factory()->for($shop)->create(['branch_id' => $branchA->id, 'status' => 'completed']);
         $saleB = Sale::factory()->for($shop)->create(['branch_id' => $branchB->id, 'status' => 'completed']);
@@ -65,7 +65,7 @@ class SalesControllerTest extends TestCase
         $shop->user()->associate($owner);
         $shop->save();
         $branch = Branch::factory()->create(['shop_owner_id' => $shop->id]);
-        $head = $this->makeBranchHead($shop, $branch, 'pos-head@example.com', ['sales.pos']);
+        $head = $this->makeBranchHead($shop, $branch, 'pos-head@example.com', ['sales.pos.create']);
 
         $product = Product::factory()->for($shop)->create([
             'current_stock' => '10.0000',

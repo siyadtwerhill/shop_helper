@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\SubscriptionChange;
+use App\Services\BranchModeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SubscriptionController extends Controller
 {
@@ -65,18 +67,24 @@ class SubscriptionController extends Controller
             'reason' => 'nullable|string|max:255',
         ]);
 
-        $fromPlanId = $subscription->plan_id;
+        DB::transaction(function () use ($subscription, $data, $request) {
+            $subscription = $subscription->newQuery()->whereKey($subscription->id)->lockForUpdate()->firstOrFail();
+            $shop = $subscription->shopOwner()->lockForUpdate()->firstOrFail();
+            $fromPlanId = $subscription->plan_id;
 
-        $subscription->update(['plan_id' => $data['plan_id']]);
-        $subscription->shopOwner->update(['plan_id' => $data['plan_id']]); // keep convenience column in sync
+            $subscription->update(['plan_id' => $data['plan_id']]);
+            $shop->update(['plan_id' => $data['plan_id']]);
 
-        SubscriptionChange::create([
-            'subscription_id' => $subscription->id,
-            'from_plan_id' => $fromPlanId,
-            'to_plan_id' => $data['plan_id'],
-            'changed_by_user_id' => $request->user()->id,
-            'reason' => $data['reason'] ?? null,
-        ]);
+            SubscriptionChange::create([
+                'subscription_id' => $subscription->id,
+                'from_plan_id' => $fromPlanId,
+                'to_plan_id' => $data['plan_id'],
+                'changed_by_user_id' => $request->user()->id,
+                'reason' => $data['reason'] ?? null,
+            ]);
+
+            app(BranchModeService::class)->ensureInitialBranch($shop->fresh('plan'));
+        });
 
         return response()->json(['message' => 'Plan changed.', 'subscription' => $subscription->fresh('plan')]);
     }

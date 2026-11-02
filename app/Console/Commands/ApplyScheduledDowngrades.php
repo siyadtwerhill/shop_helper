@@ -3,7 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Models\Subscription;
+use App\Services\BranchModeService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 class ApplyScheduledDowngrades extends Command
 {
@@ -17,12 +19,19 @@ class ApplyScheduledDowngrades extends Command
             ->get();
 
         foreach ($subscriptions as $sub) {
-            $sub->shopOwner->update(['plan_id' => $sub->pending_plan_id]);
-            $sub->update([
-                'plan_id' => $sub->pending_plan_id,
-                'pending_plan_id' => null,
-                'current_period_end' => now()->addMonth(),
-            ]);
+            DB::transaction(function () use ($sub) {
+                $locked = Subscription::whereKey($sub->id)->lockForUpdate()->first();
+                if (! $locked || ! $locked->pending_plan_id || $locked->current_period_end?->isFuture()) return;
+
+                $shop = $locked->shopOwner()->lockForUpdate()->firstOrFail();
+                $shop->update(['plan_id' => $locked->pending_plan_id]);
+                $locked->update([
+                    'plan_id' => $locked->pending_plan_id,
+                    'pending_plan_id' => null,
+                    'current_period_end' => now()->addMonth(),
+                ]);
+                app(BranchModeService::class)->ensureInitialBranch($shop->fresh('plan'));
+            });
         }
 
         $this->info("Applied {$subscriptions->count()} scheduled downgrades.");

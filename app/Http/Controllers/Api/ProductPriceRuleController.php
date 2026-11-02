@@ -23,7 +23,7 @@ class ProductPriceRuleController extends Controller
     public function store(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.pricing.create');
 
         $data = $request->validate([
             'unit_id' => ['required', Rule::exists('product_units', 'id')->where('product_id', $product->id)],
@@ -40,7 +40,7 @@ class ProductPriceRuleController extends Controller
     public function update(Request $request, Product $product, ProductPriceRule $priceRule)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.pricing.edit');
         abort_if($priceRule->product_id !== $product->id, 404);
 
         $data = $request->validate([
@@ -57,7 +57,7 @@ class ProductPriceRuleController extends Controller
     public function destroy(Request $request, Product $product, ProductPriceRule $priceRule)
     {
         $this->ownedProduct($request, $product);
-        $this->authorizeAction($request, 'products.edit');
+        $this->authorizeAction($request, 'products.pricing.delete');
         abort_if($priceRule->product_id !== $product->id, 404);
 
         $priceRule->delete();

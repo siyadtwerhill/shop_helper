@@ -20,6 +20,7 @@ class FeatureSeeder extends Seeder
         $featuresData = [
             'employees' => [
                 ['name' => 'Employee Management', 'slug' => 'employees', 'sort_order' => 1],
+                ['name' => 'Roles & Permissions', 'slug' => 'employees.roles', 'sort_order' => 2],
             ],
             'branches' => [
                 ['name' => 'Branch Management', 'slug' => 'branches', 'sort_order' => 1],
@@ -31,6 +32,12 @@ class FeatureSeeder extends Seeder
                 ['name' => 'Product Bundles', 'slug' => 'products.bundles', 'sort_order' => 4],
                 ['name' => 'Product Pricing', 'slug' => 'products.pricing', 'sort_order' => 5],
                 ['name' => 'Inventory Stock', 'slug' => 'inventory.stock', 'sort_order' => 6],
+            ],
+            'inventory' => [
+                ['name' => 'Warehouses', 'slug' => 'inventory.warehouses', 'sort_order' => 1],
+                ['name' => 'Stock Transfers', 'slug' => 'inventory.transfers', 'sort_order' => 2],
+                ['name' => 'Purchases', 'slug' => 'inventory.purchases', 'sort_order' => 3],
+                ['name' => 'Supplier Management', 'slug' => 'suppliers', 'sort_order' => 4],
             ],
             'sales' => [
                 ['name' => 'Sales Management', 'slug' => 'sales', 'sort_order' => 1],

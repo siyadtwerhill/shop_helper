@@ -13,6 +13,7 @@ class InventoryMovement extends Model
     protected $fillable = [
         'product_id',
         'branch_id',
+        'warehouse_id',
         'variant_id',
         'unit_id',
         'quantity',
@@ -37,6 +38,11 @@ class InventoryMovement extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function warehouse()
+    {
+        return $this->belongsTo(Warehouse::class);
     }
 
     /** The unit (catalog unit) this movement was recorded in. */

@@ -38,7 +38,9 @@ class RequirePermission
         // not fall through as ordinary staff with elevated branch permissions.
         abort_if($user->hasAnyRole(['Branch Head', 'branch_head']) && ! $user->isBranchHead(), 403, 'Branch Head assignment is invalid.');
 
-        abort_unless($user->can($permission), 403, 'You do not have permission to do this.');
+        $requiredPermissions = array_filter(explode('|', $permission));
+        $hasPermission = collect($requiredPermissions)->contains(fn (string $required) => $user->can($required));
+        abort_unless($hasPermission, 403, 'You do not have permission to do this.');
 
         return $next($request);
     }

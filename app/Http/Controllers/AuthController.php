@@ -8,6 +8,7 @@ use App\Models\Staff;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Services\BlueprintPresetService;
+use App\Services\BranchModeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -44,7 +45,7 @@ class AuthController extends Controller
         // login, without a second request. Whichever path doesn't apply
         // to this user's role just resolves to null.
         $user = User::where('email', $request->email)
-            ->with(['shopOwner.plan', 'staff.branch', 'staff.shopOwner.plan'])
+            ->with(['shopOwner.plan.modules', 'staff.branch', 'staff.shopOwner.plan.modules'])
             ->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
@@ -77,6 +78,10 @@ class AuthController extends Controller
             // Shop owners and superadmins have all permissions
             $userData['permissions'] = [];
         }
+        $shop = $user->shopOwner ?? $user->staff?->shopOwner;
+        $userData['inventory_logistics_enabled'] = $shop
+            ? app(BranchModeService::class)->inventoryLogisticsEnabledFor($shop)
+            : false;
 
         $payload = [
             'user' => $userData,
@@ -148,6 +153,8 @@ class AuthController extends Controller
 
         $userData = $user->toArray();
         $userData['permissions'] = [];
+        $shopOwner->load('plan.modules');
+        $userData['inventory_logistics_enabled'] = app(BranchModeService::class)->inventoryLogisticsEnabledFor($shopOwner);
 
         return response()->json([
             'user' => $userData,

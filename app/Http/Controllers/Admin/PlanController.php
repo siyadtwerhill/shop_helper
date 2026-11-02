@@ -8,6 +8,7 @@ use App\Models\Plan;
 use App\Models\ShopOwner;
 use App\Models\Subscription;
 use App\Models\SubscriptionChange;
+use App\Services\BranchModeService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 
@@ -54,8 +55,15 @@ class PlanController extends Controller
             return response()->json(['message' => 'Plan availability cannot be changed after creation. Create a new plan to change its audience.'], 422);
         }
 
-        $plan->update(collect($data)->except(['module_ids', 'subscription_months'])->toArray());
-        $plan->modules()->sync($data['module_ids'] ?? []);
+        DB::transaction(function () use ($plan, $data) {
+            $plan->update(collect($data)->except(['module_ids', 'subscription_months'])->toArray());
+            $plan->modules()->sync($data['module_ids'] ?? []);
+
+            $shops = ShopOwner::where('plan_id', $plan->id)->lockForUpdate()->get();
+            foreach ($shops as $shop) {
+                app(BranchModeService::class)->ensureInitialBranch($shop->fresh('plan'));
+            }
+        });
 
         return response()->json(['plan' => $plan->load('modules:id', 'specificShop:id,shop_name'), 'message' => 'Plan updated.']);
     }
@@ -193,6 +201,7 @@ class PlanController extends Controller
         }
 
         $shop->update(['plan_id' => $plan->id]);
+        app(BranchModeService::class)->ensureInitialBranch($shop->fresh('plan'));
 
         if ($fromPlanId !== $plan->id) {
             SubscriptionChange::create([

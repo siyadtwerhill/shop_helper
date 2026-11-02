@@ -26,7 +26,7 @@ class Product extends Model
         'shop_owner_id', 'branch_id', 'category_id', 'brand_id',
         'name', 'description', 'internal_notes', 'image_path',
         'sku', 'qr_path', 'status', 'product_type', 'base_unit_id',
-        'pricing_mode', 'cost_price', 'min_margin_percent', 'min_price', 'min_stock',
+        'pricing_mode', 'cost_price', 'min_margin_percent', 'min_margin_type', 'min_margin_value', 'min_price', 'min_stock',
         'blueprint_id', 'blueprint_version', 'stock_mode', 'custom_fields',
         'reorder_quantity', 'track_stock', 'allow_negative_stock', 'is_sellable',
         'created_by', 'updated_by',
@@ -35,6 +35,7 @@ class Product extends Model
     protected $casts = [
         'cost_price' => 'decimal:2',
         'min_margin_percent' => 'decimal:2',
+        'min_margin_value' => 'decimal:2',
         'min_price' => 'decimal:2',
         'min_stock' => 'decimal:4',
         'current_stock' => 'decimal:4',

@@ -58,9 +58,9 @@ class ProductVariantService
      * @param  array $rows [{attributes:{}, selling_price?, purchase_price?, sku?, barcode?, opening_stock?, image_path?}]
      * @return array{created: array, skipped: array}
      */
-    public function createMany(Product $product, array $rows, ?int $userId, bool $skipExisting = false): array
+    public function createMany(Product $product, array $rows, ?int $userId, bool $skipExisting = false, ?int $branchId = null): array
     {
-        return DB::transaction(function () use ($product, $rows, $userId, $skipExisting) {
+        return DB::transaction(function () use ($product, $rows, $userId, $skipExisting, $branchId) {
             $locked = Product::whereKey($product->id)->lockForUpdate()->firstOrFail();
             $this->assertCanHaveVariants($locked);
 
@@ -127,7 +127,7 @@ class ProductVariantService
                 ]);
 
                 if (bccomp($stock, '0', 4) > 0) {
-                    $this->movements->openingStock($locked, $base, $stock, $userId, $variant);
+                    $this->movements->openingStock($locked, $base, $stock, $userId, $variant, $branchId);
                 }
 
                 $created[] = $variant;

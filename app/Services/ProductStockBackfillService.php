@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Database\Query\JoinClause;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -60,7 +61,7 @@ class ProductStockBackfillService
                         ]);
                     }
 
-                    DB::table('stock_reconciliation_log')->insert([
+                    $logData = [
                         'product_id' => $result['product_id'],
                         'shop_owner_id' => $result['shop_owner_id'],
                         'shop_name_snapshot' => $result['shop_name'],
@@ -74,9 +75,26 @@ class ProductStockBackfillService
                         'status' => $result['status'],
                         'reason_code' => $result['reason_code'],
                         'reason' => $result['reason'],
-                        'created_at' => now(),
                         'updated_at' => now(),
-                    ]);
+                    ];
+                    $existingLog = DB::table('stock_reconciliation_log')
+                        ->where('product_id', $result['product_id'])
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($existingLog) {
+                        // A missing-branch outcome can be safely retried after
+                        // the first branch exists; retain the original audit row.
+                        DB::table('stock_reconciliation_log')
+                            ->where('product_id', $result['product_id'])
+                            ->update(Arr::only($logData, [
+                                'destination_branch_id', 'destination_branch_name_snapshot',
+                                'status', 'reason_code', 'reason', 'updated_at',
+                            ]));
+                    } else {
+                        $logData['created_at'] = now();
+                        DB::table('stock_reconciliation_log')->insert($logData);
+                    }
                 }, 3);
             }
         });
@@ -91,6 +109,20 @@ class ProductStockBackfillService
                 $join->on('source_branches.id', '=', 'products.branch_id')
                     ->on('source_branches.shop_owner_id', '=', 'products.shop_owner_id');
             })
+            ->addSelect([
+                'fallback_branch_id' => DB::table('branches as first_branch')
+                    ->select('first_branch.id')
+                    ->whereColumn('first_branch.shop_owner_id', 'products.shop_owner_id')
+                    ->where('first_branch.is_active', true)
+                    ->orderBy('first_branch.id')
+                    ->limit(1),
+                'fallback_branch_name' => DB::table('branches as first_branch_name')
+                    ->select('first_branch_name.name')
+                    ->whereColumn('first_branch_name.shop_owner_id', 'products.shop_owner_id')
+                    ->where('first_branch_name.is_active', true)
+                    ->orderBy('first_branch_name.id')
+                    ->limit(1),
+            ])
             ->select([
                 'products.id as product_id',
                 'products.shop_owner_id',
@@ -156,9 +188,15 @@ class ProductStockBackfillService
             }
 
             if ($log->status === 'migrated') {
-                if ($log->reason_code !== 'migrated'
-                    || (int) $log->destination_branch_id !== (int) $log->source_branch_id
-                    || (int) $product->valid_branch_id !== (int) $log->destination_branch_id) {
+                $destinationStillValid = match ($log->reason_code) {
+                    'migrated' => $product->source_branch_id !== null
+                        && (int) $product->valid_branch_id === (int) $log->destination_branch_id,
+                    'default_first_branch' => $product->source_branch_id === null
+                        && (int) $product->fallback_branch_id === (int) $log->destination_branch_id,
+                    default => false,
+                };
+
+                if (! $destinationStillValid || $log->destination_branch_id === null) {
                     return $this->conflict($result, 'The recorded destination branch is not currently owned by the product shop.');
                 }
 
@@ -174,6 +212,26 @@ class ProductStockBackfillService
 
                 $result['action'] = 'already migrated';
             } elseif ($log->status === 'unresolved') {
+                $hasTrackedStock = DB::table('product_stocks')->where('product_id', $product->product_id)->exists();
+                if ($log->reason_code === 'missing_branch'
+                    && $product->source_branch_id === null
+                    && $product->fallback_branch_id !== null
+                    && $this->decimal($product->original_stock) !== '0.0000'
+                    && ! $hasTrackedStock) {
+                    $result['status'] = 'migrated';
+                    $result['reason_code'] = 'default_first_branch';
+                    $result['destination_branch_id'] = $product->fallback_branch_id;
+                    $result['destination_branch_name'] = $product->fallback_branch_name;
+                    $result['reason'] = 'Legacy shop-level stock assigned to the first active branch after provisioning; product definition remains shared.';
+                    $result['action'] = 'would record';
+
+                    return $result;
+                }
+
+                if ($log->reason_code === 'missing_branch' && $hasTrackedStock) {
+                    return $this->conflict($result, 'Tracked stock appeared after the missing-branch audit; reconcile it before retrying.');
+                }
+
                 $branchIsValid = $product->valid_branch_id !== null;
                 $stillUnresolved = match ($log->reason_code) {
                     'missing_branch' => $product->source_branch_id === null,
@@ -210,7 +268,6 @@ class ProductStockBackfillService
             return $result;
         }
 
-        $branchIsValid = $product->valid_branch_id !== null;
         $stock = $product->original_stock;
         $existingStocks = DB::table('product_stocks')->where('product_id', $product->product_id)->get();
 
@@ -220,21 +277,31 @@ class ProductStockBackfillService
             }
 
             $result['status'] = 'zero_balance';
-            $result['reason_code'] = $branchIsValid
+            $result['reason_code'] = $product->valid_branch_id !== null
                 ? 'zero_balance_valid_branch'
                 : ($product->source_branch_id === null ? 'zero_balance_missing_branch' : 'zero_balance_invalid_branch');
-            $result['reason'] = $branchIsValid
+            $result['reason'] = $product->valid_branch_id !== null
                 ? 'Zero balance; no stock row is required.'
                 : 'Zero balance; no valid source branch, and no stock row will be assigned.';
 
             return $result;
         }
 
-        if (! $branchIsValid) {
+        $destinationBranchId = $product->valid_branch_id;
+        $destinationBranchName = $product->source_branch_name;
+        $reasonCode = 'migrated';
+
+        if ($product->source_branch_id === null && $product->fallback_branch_id !== null) {
+            $destinationBranchId = $product->fallback_branch_id;
+            $destinationBranchName = $product->fallback_branch_name;
+            $reasonCode = 'default_first_branch';
+        }
+
+        if ($destinationBranchId === null) {
             $result['status'] = 'unresolved';
             $result['reason_code'] = $product->source_branch_id === null ? 'missing_branch' : 'invalid_branch';
             $result['reason'] = $product->source_branch_id === null
-                ? 'No source branch attribution.'
+                ? 'No source branch attribution and the shop has no active first branch.'
                 : 'Source branch does not exist or belongs to another shop.';
 
             return $result;
@@ -243,7 +310,7 @@ class ProductStockBackfillService
         if ($existingStocks->isNotEmpty()) {
             $result['status'] = 'unresolved';
             $matching = $existingStocks->contains(fn (object $row): bool =>
-                (int) $row->branch_id === (int) $product->valid_branch_id
+                (int) $row->branch_id === (int) $destinationBranchId
                 && (int) $row->shop_owner_id === (int) $product->shop_owner_id
                 && $this->decimal($row->current_stock) === $this->decimal($stock)
             );
@@ -256,10 +323,12 @@ class ProductStockBackfillService
         }
 
         $result['status'] = 'migrated';
-        $result['reason_code'] = 'migrated';
-        $result['destination_branch_id'] = $product->valid_branch_id;
-        $result['destination_branch_name'] = $product->source_branch_name;
-        $result['reason'] = 'Valid source branch and no existing branch stock row.';
+        $result['reason_code'] = $reasonCode;
+        $result['destination_branch_id'] = $destinationBranchId;
+        $result['destination_branch_name'] = $destinationBranchName;
+        $result['reason'] = $reasonCode === 'default_first_branch'
+            ? 'Legacy shop-level stock assigned to the first active branch; product definition remains shared.'
+            : 'Valid source branch and no existing branch stock row.';
 
         return $result;
     }
@@ -270,8 +339,20 @@ class ProductStockBackfillService
             $product->valid_branch_id = null;
             $product->source_branch_name = null;
 
+            $fallbackBranch = DB::table('branches')
+                ->where('shop_owner_id', $product->shop_owner_id)
+                ->where('is_active', true)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
+            $product->fallback_branch_id = $fallbackBranch?->id;
+            $product->fallback_branch_name = $fallbackBranch?->name;
+
             return;
         }
+
+        $product->fallback_branch_id = null;
+        $product->fallback_branch_name = null;
 
         $branch = DB::table('branches')
             ->where('id', $product->source_branch_id)

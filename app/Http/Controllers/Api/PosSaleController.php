@@ -6,6 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Services\SaleItemService;
+use App\Services\ProductStockService;
+use App\Services\PricingService;
+use App\Exceptions\MinimumMarginViolationException;
+use App\Exceptions\PriceBelowMinimumException;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -13,6 +18,8 @@ class PosSaleController extends Controller
 {
     public function __construct(
         private SaleItemService $saleItems,
+        private ProductStockService $stock,
+        private PricingService $pricing,
     ) {
     }
 
@@ -26,15 +33,29 @@ class PosSaleController extends Controller
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.unit_id'    => 'required|exists:product_units,id',
             'items.*.quantity'   => 'required|numeric|min:0.0001',
-            'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.requested_price' => 'nullable|decimal:0,2|min:0',
             'items.*.variant_id' => 'nullable|integer',
             'discount_amount'    => 'nullable|numeric|min:0',
+            'branch_id'          => 'nullable|integer',
         ]);
 
         $user = $request->user();
-        $branchId = $user->isBranchHead() ? (int) $user->staff->branch_id : null;
+        $branchId = $this->stock->resolveBranchId(
+            $request,
+            (int) $shop->id,
+            required: true,
+            requestedBranchId: isset($data['branch_id']) ? (int) $data['branch_id'] : null,
+        );
 
-        $sale = DB::transaction(function () use ($data, $shop, $request, $branchId) {
+        // Wholesale tiers apply to the total quantity of a product/unit across
+        // the sale, including when the cashier selected multiple variants.
+        $pricingQuantities = [];
+        foreach ($data['items'] as $item) {
+            $key = $item['product_id'].':'.$item['unit_id'];
+            $pricingQuantities[$key] = bcadd($pricingQuantities[$key] ?? '0.0000', (string) $item['quantity'], 4);
+        }
+
+        $sale = DB::transaction(function () use ($data, $shop, $request, $branchId, $pricingQuantities) {
             $sale = Sale::create([
                 'shop_owner_id'   => $shop->id,
                 'branch_id'       => $branchId,
@@ -46,9 +67,10 @@ class PosSaleController extends Controller
             ]);
 
             $subtotal = '0.00';
-            foreach ($data['items'] as $item) {
+            foreach ($data['items'] as $itemIndex => $item) {
                 // Scope to shop so cross-shop product IDs return 404 rather than 500.
                 $product = Product::where('shop_owner_id', $shop->id)->findOrFail($item['product_id']);
+                $this->stock->assertVisibleAtBranch($product, $branchId, strict: true);
                 $unit    = $product->units()->findOrFail($item['unit_id']);
 
                 // Resolve variant when sent.
@@ -70,11 +92,27 @@ class PosSaleController extends Controller
                 );
 
                 $bundle = $product->bundle()->first();
+                try {
+                    $quote = $this->pricing->resolvePrice(
+                        $product,
+                        $unit,
+                        $pricingQuantities[$item['product_id'].':'.$item['unit_id']],
+                        isset($item['requested_price']) ? (string) $item['requested_price'] : null,
+                        $request->user(),
+                        $variant,
+                        $bundle ? (string) $bundle->bundle_price : null,
+                    );
+                } catch (PriceBelowMinimumException|MinimumMarginViolationException|\InvalidArgumentException $e) {
+                    throw ValidationException::withMessages([
+                        "items.{$itemIndex}.requested_price" => [$e->getMessage()],
+                    ]);
+                }
+                $unitPrice = $quote['price'];
 
                 if ($bundle) {
                     $this->saleItems->sellBundle(
                         $product, $bundle, $unit, $item['quantity'],
-                        (string) $item['unit_price'], $sale->id, $request->user()->id,
+                        $unitPrice, $sale->id, $request->user()->id,
                         branchId: $branchId,
                     );
                 } else {
@@ -82,7 +120,7 @@ class PosSaleController extends Controller
                         $product,
                         $unit,
                         $item['quantity'],
-                        (string) $item['unit_price'],
+                        $unitPrice,
                         $sale->id,
                         createdBy: $request->user()->id,
                         variant: $variant,
@@ -90,7 +128,7 @@ class PosSaleController extends Controller
                     );
                 }
 
-                $subtotal = bcadd($subtotal, bcmul((string) $item['quantity'], (string) $item['unit_price'], 2), 2);
+                $subtotal = bcadd($subtotal, bcmul((string) $item['quantity'], $unitPrice, 2), 2);
             }
 
             $discount = (string) ($data['discount_amount'] ?? '0.00');

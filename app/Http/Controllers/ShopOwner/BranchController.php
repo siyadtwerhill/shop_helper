@@ -8,9 +8,12 @@ use App\Models\BranchHeadAssignmentHistory;
 use App\Models\InventoryMovement;
 use App\Models\Role;
 use App\Models\Sale;
+use App\Models\ShopOwner;
 use App\Models\Staff;
+use App\Services\BranchModeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -31,6 +34,8 @@ class BranchController extends Controller
     public function index(Request $request)
     {
         $shop = $this->shop($request);
+        $branchMode = app(BranchModeService::class)->enabledFor($shop);
+        app(BranchModeService::class)->ensureInitialBranch($shop);
 
         $query = Branch::where('shop_owner_id', $shop->id)
             ->withCount('staff')
@@ -50,25 +55,16 @@ class BranchController extends Controller
                 'used' => Branch::where('shop_owner_id', $shop->id)->count(),
                 'limit' => $shop->plan?->max_branches,
             ],
+            'branch_mode_enabled' => $branchMode,
         ]);
     }
 
     public function store(Request $request)
     {
         $shop = $this->shop($request);
-
         // Branch heads cannot create new branches
         if (auth()->user()->isBranchHead()) {
             return response()->json(['message' => 'Branch heads cannot create new branches.'], 403);
-        }
-
-        if ($shop->plan?->max_branches !== null) {
-            $current = Branch::where('shop_owner_id', $shop->id)->count();
-            if ($current >= $shop->plan->max_branches) {
-                return response()->json([
-                    'message' => "You've reached your plan's branch limit ({$shop->plan->max_branches}). Upgrade to add more.",
-                ], 403);
-            }
         }
 
         $data = $request->validate([
@@ -78,13 +74,25 @@ class BranchController extends Controller
             'head_staff_id' => 'prohibited',
         ]);
 
-        $branch = Branch::create([
-                'shop_owner_id' => $shop->id,
+        $branch = DB::transaction(function () use ($shop, $data) {
+            $lockedShop = ShopOwner::whereKey($shop->id)->lockForUpdate()->with('plan')->firstOrFail();
+            abort_unless(app(BranchModeService::class)->allowsBranchStorage($lockedShop), 403, 'Your plan does not include branch storage.');
+            abort_unless(app(BranchModeService::class)->branchModuleEnabled($lockedShop), 403, 'Your plan does not include the Branches module.');
+
+            $limit = $lockedShop->plan?->max_branches;
+            $current = Branch::where('shop_owner_id', $lockedShop->id)->count();
+            if ($limit !== null && $current >= $limit) {
+                abort(403, "You've reached your plan's branch limit ({$limit}). Upgrade to add more.");
+            }
+
+            return Branch::create([
+                'shop_owner_id' => $lockedShop->id,
                 'name' => $data['name'],
                 'address' => $data['address'] ?? null,
                 'phone' => $data['phone'] ?? null,
                 'is_active' => true,
             ]);
+        });
 
         return response()->json(['message' => 'Branch created.', 'branch' => $branch->fresh('head.user')], 201);
     }
@@ -113,6 +121,25 @@ class BranchController extends Controller
             'is_active' => 'sometimes|boolean',
         ]);
 
+        if (array_key_exists('is_active', $data) && ! $data['is_active'] && $branch->is_active) {
+            abort_if(
+                Branch::where('shop_owner_id', $shop->id)->where('is_active', true)->count() <= 1,
+                422,
+                'Keep at least one active branch for inventory operations.'
+            );
+            $hasStock = Schema::hasTable('product_stocks')
+                && DB::table('product_stocks')->where('branch_id', $branch->id)->where('current_stock', '>', 0)->exists();
+            $hasOpenTransfer = Schema::hasTable('stock_transfers') && DB::table('stock_transfers')
+                ->whereIn('status', ['draft', 'in_transit'])
+                ->where(fn ($query) => $query
+                    ->where(fn ($source) => $source->where('source_type', 'branch')->where('source_id', $branch->id))
+                    ->orWhere(fn ($destination) => $destination->where('destination_type', 'branch')->where('destination_id', $branch->id)))
+                ->exists();
+            $hasDraftPurchase = Schema::hasTable('purchases') && DB::table('purchases')
+                ->where('location_type', 'branch')->where('location_id', $branch->id)->where('status', 'draft')->exists();
+            abort_if($hasStock || $hasOpenTransfer || $hasDraftPurchase, 422, 'Move remaining stock and finish draft purchases or transfers before deactivating this branch.');
+        }
+
         DB::transaction(function () use ($branch, $request, $data) {
             $branch->update($request->only(['name', 'address', 'phone', 'is_active']));
 
@@ -138,9 +165,25 @@ class BranchController extends Controller
             return response()->json(['message' => 'Move or remove staff from this branch before deleting it.'], 422);
         }
 
+        if (Branch::where('shop_owner_id', $shop->id)->where('is_active', true)->count() <= 1) {
+            return response()->json(['message' => 'Keep at least one active branch for inventory operations.'], 422);
+        }
+
+        if (DB::table('products')->where('branch_id', $branch->id)->exists()
+            || (Schema::hasTable('product_stocks') && DB::table('product_stocks')->where('branch_id', $branch->id)->exists())) {
+            return response()->json(['message' => 'This branch has product assignments or stock balances. Reassign or reconcile them before deleting it.'], 422);
+        }
+
         if (Sale::where('branch_id', $branch->id)->exists()
             || InventoryMovement::where('branch_id', $branch->id)->exists()) {
             return response()->json(['message' => 'This branch has sales or inventory history and cannot be deleted.'], 422);
+        }
+
+        if ((Schema::hasTable('stock_transfers') && DB::table('stock_transfers')->where(function ($query) use ($branch) {
+            $query->where(fn ($source) => $source->where('source_type', 'branch')->where('source_id', $branch->id))
+                ->orWhere(fn ($destination) => $destination->where('destination_type', 'branch')->where('destination_id', $branch->id));
+        })->exists()) || (Schema::hasTable('purchases') && DB::table('purchases')->where('location_type', 'branch')->where('location_id', $branch->id)->exists())) {
+            return response()->json(['message' => 'This branch is referenced by purchase or transfer history and cannot be deleted.'], 422);
         }
 
         $branch->delete();

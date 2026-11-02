@@ -43,13 +43,20 @@ class ProductController extends Controller
     public function index(Request $request)
     {
         $shop = $this->shop($request);
+        $branchId = $this->stock->resolveBranchId($request, (int) $shop->id);
 
         $query = Product::where('shop_owner_id', $shop->id)
             ->with(['category:id,name', 'brand:id,name', 'barcodes', 'baseUnit.unit', 'branch:id,name', 'blueprint:id,name,capabilities',
-                    'bundle.items.unit', 'bundle.items.component:id,current_stock'])
+                    'bundle.items.unit', 'bundle.items.component:id,name,shop_owner_id,stock_mode'])
             ->withCount('variants')
             ->withMin('variants', 'selling_price')
             ->withMax('variants', 'selling_price');
+
+        if ($branchId !== null) {
+            $query->where(function ($scope) use ($branchId) {
+                $scope->whereNull('products.branch_id')->orWhere('products.branch_id', $branchId);
+            });
+        }
 
         if ($request->input('status') === 'archived') {
             $query->withTrashed();
@@ -72,8 +79,17 @@ class ProductController extends Controller
         $sortDir = $request->sort_dir === 'asc' ? 'asc' : 'desc';
         $perPage = min(max((int) $request->input('per_page', 20), 1), 100);
 
-        $page = $query->orderBy($sortBy, $sortDir)->orderBy('id', 'desc')->paginate($perPage);
-        $this->stock->hydrate($page->getCollection());
+        if ($sortBy === 'current_stock') {
+            $branchFilter = $branchId === null ? '' : ' AND product_stocks.branch_id = ?';
+            $query->orderByRaw(
+                '(SELECT COALESCE(SUM(product_stocks.current_stock), 0) FROM product_stocks WHERE product_stocks.product_id = products.id'.$branchFilter.') '.$sortDir,
+                $branchId === null ? [] : [$branchId]
+            );
+        } else {
+            $query->orderBy('products.'.$sortBy, $sortDir);
+        }
+        $page = $query->orderBy('products.id', 'desc')->paginate($perPage);
+        $this->stock->hydrate($page->getCollection(), $branchId);
         $shop->loadMissing('plan:id,max_products');
 
         return response()->json([
@@ -88,13 +104,15 @@ class ProductController extends Controller
     public function show(Request $request, Product $product)
     {
         $this->ownedProduct($request, $product);
+        $branchId = $this->stock->resolveBranchId($request, (int) $product->shop_owner_id);
+        $this->stock->assertVisibleAtBranch($product, $branchId);
 
         $product->load([
             'category:id,name', 'brand:id,name', 'barcodes', 'units.unit', 'baseUnit.unit',
             'bundle.items.component', 'bundle.items.unit',
             'blueprint:id,name,version,capabilities',
         ]);
-        $this->stock->hydrate([$product]);
+        $this->stock->hydrate([$product], $branchId);
 
         return response()->json(['product' => $product]);
     }
@@ -102,7 +120,11 @@ class ProductController extends Controller
     public function store(Request $request)
     {
         $shop = $this->shop($request);
-        $this->authorizeAction($request, 'products.create');
+        $createPermission = $request->input('product_type') === 'bundle'
+            ? 'products.bundles.create'
+            : 'products.create';
+        $this->authorizeAction($request, $createPermission);
+        abort_if($request->filled('branch_id') && ($request->user()->role !== 'shop_owner' || ! app(\App\Services\BranchModeService::class)->enabledFor($shop)), 403, 'Branch-specific products require a multi-branch plan and shop-owner access.');
 
         if ($shop->plan?->max_products !== null
             && Product::where('shop_owner_id', $shop->id)->count() >= $shop->plan->max_products) {
@@ -133,7 +155,8 @@ class ProductController extends Controller
                 'internal_notes' => 'nullable|string',
                 'category_id' => ['nullable', Rule::exists('categories', 'id')->where('shop_owner_id', $shop->id)],
                 'brand_id' => ['nullable', Rule::exists('brands', 'id')->where('shop_owner_id', $shop->id)],
-                'branch_id' => ['nullable', Rule::exists('branches', 'id')->where('shop_owner_id', $shop->id)],
+                'stock_branch_id' => ['nullable', 'integer', Rule::exists('branches', 'id')->where('shop_owner_id', $shop->id)->where('is_active', true)],
+                'branch_id' => ['nullable', 'integer', Rule::exists('branches', 'id')->where('shop_owner_id', $shop->id)->where('is_active', true)],
                 'image' => 'nullable|image|max:2048',
                 'status' => 'nullable|in:active,inactive',
                 'product_type' => 'nullable|in:neutral,variant,bundle',
@@ -145,6 +168,8 @@ class ProductController extends Controller
                 'cost_price' => [($policy['cost_required'] ?? false) && $request->input('product_type') !== 'bundle' ? 'required' : 'nullable', 'numeric', 'min:0'],
                 'selling_price' => 'required|numeric|min:0',
                 'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
+                'min_margin_type' => 'nullable|in:percentage,amount',
+                'min_margin_value' => 'nullable|numeric|min:0',
                 'min_price' => 'nullable|numeric|min:0',
                 'min_stock' => 'nullable|numeric|min:0',
 
@@ -178,6 +203,10 @@ class ProductController extends Controller
         $this->fieldRules->assertKnownKeys($blueprint, $data['custom_fields'] ?? []);
 
         $type = $data['product_type'] ?? 'neutral';
+        $marginValue = $data['min_margin_value'] ?? $data['min_margin_percent'] ?? ($policy['min_margin_percent'] ?? null);
+        $marginType = $data['min_margin_type'] ?? ($marginValue !== null ? 'percentage' : null);
+        abort_if($marginValue !== null && ($data['cost_price'] ?? null) === null, 422, 'Set a cost price before configuring a minimum margin.');
+        abort_if($marginType === 'percentage' && $marginValue !== null && bccomp((string) $marginValue, '99.99', 2) > 0, 422, 'Percentage margin cannot exceed 99.99%.');
         abort_if($type === 'variant' && empty($caps['variants']), 422, 'This product type does not allow variants.');
         abort_if($type === 'bundle' && empty($caps['bundles']), 422, 'This product type does not allow bundles.');
         if ($type === 'bundle') {
@@ -200,20 +229,25 @@ class ProductController extends Controller
             abort_if(! $decimals && floor((float) $data['min_stock']) != (float) $data['min_stock'], 422, 'This product type only allows whole quantities.');
         }
 
+        $hasOpeningStock = (float) ($data['opening_stock'] ?? 0) > 0
+            || ($type === 'variant' && collect($data['variants'] ?? [])->contains(fn ($variant) => (float) ($variant['opening_stock'] ?? 0) > 0));
+        $stockBranchId = $this->stock->resolveBranchId(
+            $request,
+            (int) $shop->id,
+            required: $hasOpeningStock,
+            requestedBranchId: isset($data['stock_branch_id']) ? (int) $data['stock_branch_id'] : null,
+        );
+
         $bundleRows = $type === 'bundle'
             ? $this->bundles->normalizeItems($shop->id, $data['bundle_items'] ?? [], $decimals)
             : [];
 
-        $product = DB::transaction(function () use ($data, $shop, $request, $blueprint, $type, $policy, $bundleRows) {
+        $product = DB::transaction(function () use ($data, $shop, $request, $blueprint, $type, $policy, $bundleRows, $stockBranchId, $marginType, $marginValue) {
             $user = $request->user();
-            $branchId = $data['branch_id'] ?? null;
-            if ($user->isBranchHead() && $user->staff?->branch_id) {
-                $branchId = $user->staff->branch_id;
-            }
 
             $product = Product::create([
                 'shop_owner_id' => $shop->id,
-                'branch_id' => $branchId,
+                'branch_id' => $data['branch_id'] ?? null,
                 'category_id' => $data['category_id'] ?? null,
                 'brand_id' => $data['brand_id'] ?? null,
                 'name' => $data['name'],
@@ -227,12 +261,18 @@ class ProductController extends Controller
                 'custom_fields' => $data['custom_fields'] ?? [],
                 'pricing_mode' => $type === 'bundle' ? 'fixed' : ($data['pricing_mode'] ?? ($policy['default_mode'] ?? 'fixed')),
                 'cost_price' => $data['cost_price'] ?? null,
-                'min_margin_percent' => $data['min_margin_percent'] ?? ($policy['min_margin_percent'] ?? null),
+                'min_margin_type' => $marginType,
+                'min_margin_value' => $marginValue,
+                'min_margin_percent' => $marginType === 'percentage' ? $marginValue : null,
                 'min_price' => $data['min_price'] ?? null,
                 'min_stock' => $data['min_stock'] ?? null,
                 'created_by' => $user->id,
                 'updated_by' => $user->id,
             ]);
+
+            if ($stockBranchId !== null && $type !== 'bundle') {
+                $this->stock->ensureBranchBalance($product, $stockBranchId);
+            }
 
             if (! (ProductSystemFields::resolve($blueprint)['image']['hidden'] ?? false) && $request->hasFile('image')) {
                 $product->update(['image_path' => $request->file('image')->store('products', 'public')]);
@@ -278,7 +318,7 @@ class ProductController extends Controller
             }
 
             if (! empty($data['opening_stock']) && (float) $data['opening_stock'] > 0) {
-                $this->movements->openingStock($product, $unit, $data['opening_stock'], $user->id);
+                $this->movements->openingStock($product, $unit, $data['opening_stock'], $user->id, branchId: $stockBranchId);
             }
 
             if ($type === 'bundle') {
@@ -289,7 +329,7 @@ class ProductController extends Controller
 
             // Create variants supplied in the same request (all-or-nothing with the product row).
             if ($type === 'variant' && ! empty($data['variants'])) {
-                $this->variantService->createMany($product, $data['variants'], $user->id);
+                $this->variantService->createMany($product, $data['variants'], $user->id, branchId: $stockBranchId);
             }
 
             return $product;
@@ -306,6 +346,7 @@ class ProductController extends Controller
         $shop = $this->shop($request);
         $this->ownedProduct($request, $product);
         $this->authorizeAction($request, 'products.edit');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $shop->id));
 
         if (is_string($request->input('custom_fields'))) {
             $request->merge(['custom_fields' => json_decode($request->input('custom_fields'), true) ?? []]);
@@ -321,6 +362,7 @@ class ProductController extends Controller
                 'internal_notes' => 'nullable|string',
                 'category_id' => ['nullable', Rule::exists('categories', 'id')->where('shop_owner_id', $shop->id)],
                 'brand_id' => ['nullable', Rule::exists('brands', 'id')->where('shop_owner_id', $shop->id)],
+                'branch_id' => ['sometimes', 'nullable', 'integer', Rule::exists('branches', 'id')->where('shop_owner_id', $shop->id)->where('is_active', true)],
                 'image' => 'nullable|image|max:2048',
                 'remove_image' => 'sometimes|boolean',
                 'status' => 'sometimes|in:active,inactive',
@@ -328,11 +370,14 @@ class ProductController extends Controller
                 'pricing_mode' => ['sometimes', Rule::in($product->product_type === 'bundle' ? ['fixed'] : array_merge($this->allowedModes($policy), [$product->pricing_mode]))],
                 'cost_price' => ['sometimes', ($policy['cost_required'] ?? false) ? 'required' : 'nullable', 'numeric', 'min:0'],
                 'min_margin_percent' => 'nullable|numeric|min:0|max:99.99',
+                'min_margin_type' => 'nullable|in:percentage,amount',
+                'min_margin_value' => 'nullable|numeric|min:0',
                 'min_price' => 'nullable|numeric|min:0',
                 'min_stock' => 'nullable|numeric|min:0',
                 'selling_price' => 'nullable|numeric|min:0',
                 'conversion_factor' => 'nullable|numeric', // ignored: the base unit is always 1
                 'unit_id' => 'nullable|exists:units,id',
+                'stock_branch_id' => ['nullable', 'integer', Rule::exists('branches', 'id')->where('shop_owner_id', $shop->id)->where('is_active', true)],
                 'current_stock' => 'nullable|numeric|min:0',
                 'opening_stock' => 'nullable|numeric|min:0',
             ], partial: true),
@@ -340,6 +385,26 @@ class ProductController extends Controller
         ));
 
         $this->fieldRules->assertKnownKeys($blueprint, $data['custom_fields'] ?? []);
+
+        if (array_key_exists('min_margin_type', $data) || array_key_exists('min_margin_value', $data) || array_key_exists('min_margin_percent', $data)) {
+            $marginType = $data['min_margin_type'] ?? (array_key_exists('min_margin_percent', $data) ? 'percentage' : $product->min_margin_type);
+            $marginValue = array_key_exists('min_margin_value', $data)
+                ? $data['min_margin_value']
+                : ($data['min_margin_percent'] ?? $product->min_margin_value ?? $product->min_margin_percent);
+
+            abort_if($marginValue !== null && ($data['cost_price'] ?? $product->cost_price) === null, 422, 'Set a cost price before configuring a minimum margin.');
+            $data['min_margin_type'] = $marginValue === null ? null : ($marginType ?? 'percentage');
+            $data['min_margin_value'] = $marginValue;
+            $data['min_margin_percent'] = $data['min_margin_type'] === 'percentage' ? $marginValue : null;
+            abort_if($data['min_margin_type'] === 'percentage' && $marginValue !== null && bccomp((string) $marginValue, '99.99', 2) > 0, 422, 'Percentage margin cannot exceed 99.99%.');
+        }
+
+        if (array_key_exists('branch_id', $data) && (int) ($data['branch_id'] ?? 0) !== (int) ($product->branch_id ?? 0)) {
+            abort_if($request->user()->role !== 'shop_owner' || ! app(\App\Services\BranchModeService::class)->enabledFor($shop), 403, 'Branch-specific products require a multi-branch plan and shop-owner access.');
+            $hasTrackedHistory = DB::table('product_stocks')->where('product_id', $product->id)->exists()
+                || DB::table('inventory_movements')->where('product_id', $product->id)->whereNotNull('branch_id')->exists();
+            abort_if($hasTrackedHistory, 422, 'Move or reconcile this product branch stock before changing its branch visibility.');
+        }
 
         $bundleUnit = null;
         if ($product->product_type === 'bundle') {
@@ -362,10 +427,16 @@ class ProductController extends Controller
         $sellingPrice = $data['selling_price'] ?? null;
         $catalogUnitId = $bundleUnit?->id ?? ($data['unit_id'] ?? null);
         $desiredStock = $data['current_stock'] ?? $data['opening_stock'] ?? null;
+        $stockBranchId = $this->stock->resolveBranchId(
+            $request,
+            (int) $shop->id,
+            required: $desiredStock !== null,
+            requestedBranchId: isset($data['stock_branch_id']) ? (int) $data['stock_branch_id'] : null,
+        );
 
         abort_if(
             $desiredStock !== null && $product->stock_mode !== 'own'
-                && (float) $desiredStock !== (float) $product->getRawOriginal('current_stock'),
+                && (float) $desiredStock !== (float) $this->stock->availableFor($product, $stockBranchId),
             422,
             'Stock for this product comes from its variants or components. Change it there.'
         );
@@ -385,16 +456,16 @@ class ProductController extends Controller
         }
 
         unset($data['selling_price'], $data['conversion_factor'], $data['unit_id'],
-              $data['current_stock'], $data['opening_stock'], $data['remove_image'], $data['image']);
+              $data['current_stock'], $data['opening_stock'], $data['stock_branch_id'], $data['remove_image'], $data['image']);
 
         $decimals = (bool) (($blueprint->capabilities ?? [])['decimal_quantities'] ?? false);
         if (! empty($data['min_stock'])) {
             abort_if(! $decimals && floor((float) $data['min_stock']) != (float) $data['min_stock'], 422, 'This product type only allows whole quantities.');
         }
 
-        DB::transaction(function () use ($request, $product, $data, $sellingPrice, $catalogUnitId, $desiredStock, $decimals) {
+        DB::transaction(function () use ($request, $product, $data, $sellingPrice, $catalogUnitId, $desiredStock, $decimals, $stockBranchId) {
             $user = $request->user();
-            $stockBefore = (string) ($product->getRawOriginal('current_stock') ?? '0');
+            $stockBefore = $stockBranchId === null ? '0.0000' : $this->stock->availableFor($product, $stockBranchId);
 
             $product->fill($data);
             $product->updated_by = $user->id;
@@ -433,6 +504,7 @@ class ProductController extends Controller
                     $this->movements->adjust(
                         $product, $base, $delta,
                         referenceType: 'product_edit', createdBy: $user->id, note: 'Stock updated from product edit',
+                        branchId: $stockBranchId,
                     );
                 }
             }
@@ -456,9 +528,12 @@ class ProductController extends Controller
             }
         });
 
+        $fresh = $product->fresh(['category', 'brand', 'barcodes', 'baseUnit.unit', 'units.unit']);
+        $this->stock->hydrate([$fresh], $stockBranchId);
+
         return response()->json([
             'message' => 'Product updated.',
-            'product' => $product->fresh(['category', 'brand', 'barcodes', 'baseUnit.unit', 'units.unit']),
+            'product' => $fresh,
         ]);
     }
 
@@ -466,6 +541,7 @@ class ProductController extends Controller
     {
         $this->ownedProduct($request, $product);
         $this->authorizeAction($request, 'products.delete');
+        $this->stock->assertVisibleAtBranch($product, $this->stock->resolveBranchId($request, (int) $product->shop_owner_id));
 
         $names = $product->usedInBundles()->with('bundle.product:id,name')->get()
             ->pluck('bundle.product.name')->filter()->unique()->values();
@@ -501,16 +577,35 @@ class ProductController extends Controller
     public function lookupByBarcode(Request $request)
     {
         $shop = $this->shop($request);
-        $code = trim($request->validate(['barcode' => 'required|string'])['barcode']);
+        $data = $request->validate(['barcode' => 'required|string', 'branch_id' => 'nullable|integer']);
+        $branchId = $this->stock->resolveBranchId(
+            $request,
+            (int) $shop->id,
+            required: false,
+            requestedBranchId: isset($data['branch_id']) ? (int) $data['branch_id'] : null,
+        );
+        $code = trim($data['barcode']);
 
         $barcode = ProductBarcode::where('shop_owner_id', $shop->id)
             ->where('barcode', $code)
-            ->with('product.category:id,name', 'product.brand:id,name', 'product.baseUnit.unit')
+            ->with(['product' => function ($query): void {
+                $query->select([
+                    'id', 'shop_owner_id', 'branch_id', 'name', 'sku', 'status',
+                    'base_unit_id', 'pricing_mode', 'stock_mode', 'image_path',
+                ])->with(['baseUnit' => function ($unitQuery): void {
+                    $unitQuery->select(['id', 'unit_id', 'selling_price', 'is_base', 'is_sellable'])
+                        ->with('unit:id,name,symbol');
+                }]);
+            }])
             ->first();
 
         if (! $barcode?->product) {
             return response()->json(['found' => false, 'barcode' => $code]);
         }
+
+        $this->stock->assertVisibleAtBranch($barcode->product, $branchId, strict: true);
+
+        $this->stock->hydrate([$barcode->product], $branchId);
 
         return response()->json([
             'found' => true,
