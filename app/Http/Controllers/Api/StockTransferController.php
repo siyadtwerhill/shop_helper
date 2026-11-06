@@ -25,7 +25,7 @@ class StockTransferController extends Controller
         $shop = $this->shop($request);
         $locations->ensureFeatureEnabled($shop);
         $query = StockTransfer::where('shop_owner_id', $shop->id)
-            ->with(['items.product:id,name,sku', 'items.variant:id,display_label', 'items.productUnit.unit:id,name,symbol']);
+            ->with(['items.product:id,name,sku', 'items.variant:id,attributes', 'items.productUnit.unit:id,name,symbol']);
         if ($request->user()->isBranchHead()) {
             $branchId = (int) $request->user()->staff?->branch_id;
             $query->where(fn ($q) => $q
@@ -86,7 +86,7 @@ class StockTransferController extends Controller
             return $transfer;
         });
 
-        return response()->json(['transfer' => $transfer->load(['items.product:id,name,sku', 'items.variant:id,display_label'])], 201);
+        return response()->json(['transfer' => $transfer->load(['items.product:id,name,sku', 'items.variant:id,attributes'])], 201);
     }
 
     public function dispatch(Request $request, StockTransfer $transfer, StockLocationService $locations, UnitConversionService $conversion)

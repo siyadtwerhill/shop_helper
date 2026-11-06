@@ -18,6 +18,7 @@ class ModuleSeeder extends Seeder
             ['name' => 'Sales', 'slug' => 'sales', 'icon' => 'shopping-cart', 'description' => 'Sales management', 'sort_order' => 5, 'is_active' => true],
             ['name' => 'Customers', 'slug' => 'customers', 'icon' => 'users', 'description' => 'Customer management', 'sort_order' => 6, 'is_active' => true],
             ['name' => 'Expenses', 'slug' => 'expenses', 'icon' => 'receipt', 'description' => 'Expense management', 'sort_order' => 7, 'is_active' => true],
+            ['name' => 'Reports', 'slug' => 'reports', 'icon' => 'bar-chart', 'description' => 'Business reports and analytics', 'sort_order' => 8, 'is_active' => true],
         ];
 
         $createdModules = [];
@@ -70,6 +71,7 @@ class ModuleSeeder extends Seeder
             $createdModules['sales']->id,
             $createdModules['customers']->id,
             $createdModules['expenses']->id,
+            $createdModules['reports']->id,
         ]);
     }
 }

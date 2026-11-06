@@ -37,7 +37,36 @@ class HandleInertiaRequests extends Middleware
     {
         return [
             ...parent::share($request),
-            //
+            'auth' => [
+                'user' => $request->user() ? [
+                    'id' => $request->user()->id,
+                    'name' => $request->user()->name,
+                    'email' => $request->user()->email,
+                    'role' => $request->user()->role,
+                    'permissions' => $this->getUserPermissions($request->user()),
+                ] : null,
+            ],
         ];
+    }
+
+    protected function getUserPermissions($user)
+    {
+        if (!$user) return [];
+
+        // Shop owners and superadmins have all permissions (return empty array to indicate full access)
+        if ($user->role === 'shop_owner' || $user->role === 'superadmin') {
+            return [];
+        }
+
+        // Staff get their assigned permissions
+        if ($user->role === 'staff' && $user->staff) {
+            $shopId = $user->staff->shop_owner_id;
+            if ($shopId) {
+                \Spatie\Permission\PermissionRegistrar::setPermissionsTeamId($shopId);
+            }
+            return $user->getAllPermissions()->pluck('name')->toArray();
+        }
+
+        return [];
     }
 }

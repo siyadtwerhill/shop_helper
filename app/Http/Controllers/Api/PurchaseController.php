@@ -24,7 +24,7 @@ class PurchaseController extends Controller
     {
         $shop = $this->shop($request);
         $locations->ensureFeatureEnabled($shop);
-        $query = Purchase::where('shop_owner_id', $shop->id)->with(['supplier:id,name', 'items.product:id,name,sku', 'items.variant:id,display_label', 'items.productUnit.unit:id,name,symbol']);
+        $query = Purchase::where('shop_owner_id', $shop->id)->with(['supplier:id,name', 'items.product:id,name,sku', 'items.variant:id,attributes', 'items.productUnit.unit:id,name,symbol']);
         if ($request->user()->role === 'staff') {
             $branchId = (int) $request->user()->staff?->branch_id;
             abort_unless($branchId > 0, 403, 'Assign this employee to a branch before showing purchase records.');
@@ -90,7 +90,7 @@ class PurchaseController extends Controller
             return $purchase;
         });
 
-        return response()->json(['purchase' => $purchase->load(['supplier:id,name', 'items.product:id,name,sku', 'items.variant:id,display_label', 'items.productUnit.unit:id,name,symbol'])], 201);
+        return response()->json(['purchase' => $purchase->load(['supplier:id,name', 'items.product:id,name,sku', 'items.variant:id,attributes', 'items.productUnit.unit:id,name,symbol'])], 201);
     }
 
     public function receive(Request $request, Purchase $purchase, StockLocationService $locations, UnitConversionService $conversion)

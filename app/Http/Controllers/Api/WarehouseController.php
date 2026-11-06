@@ -45,7 +45,7 @@ class WarehouseController extends Controller
         $locations->ensureFeatureEnabled($shop);
         abort_unless((int) $warehouse->shop_owner_id === (int) $shop->id, 404);
         $stocks = WarehouseProductStock::where('warehouse_id', $warehouse->id)
-            ->with(['product:id,name,sku,barcode,track_stock', 'product.variants:id,product_id,display_label'])
+            ->with(['product:id,name,sku,track_stock', 'product.variants:id,product_id,attributes'])
             ->whereHas('product', fn ($query) => $query->where('status', 'active'))
             ->orderBy('product_id')->paginate(50);
         $variantIds = $stocks->getCollection()
@@ -72,7 +72,7 @@ class WarehouseController extends Controller
         abort_unless((int) $warehouse->shop_owner_id === (int) $shop->id, 404);
         return InventoryMovement::where('warehouse_id', $warehouse->id)
             ->whereHas('product', fn ($query) => $query->withTrashed()->where('shop_owner_id', $shop->id))
-            ->with(['product' => fn ($query) => $query->withTrashed()->select('id', 'name', 'sku', 'base_unit_id'), 'product.baseUnit.unit:id,name,symbol', 'variant:id,display_label', 'creator:id,name'])
+            ->with(['product' => fn ($query) => $query->withTrashed()->select('id', 'name', 'sku', 'base_unit_id'), 'product.baseUnit.unit:id,name,symbol', 'variant:id,attributes', 'creator:id,name'])
             ->latest('id')->paginate(30);
     }
 

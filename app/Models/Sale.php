@@ -16,6 +16,7 @@ class Sale extends Model
         'total_amount',
         'total_discount',
         'payment_method',
+        'amount_received',
         'status',
         'created_by',
     ];
@@ -24,6 +25,7 @@ class Sale extends Model
         'subtotal' => 'decimal:2',
         'total_amount' => 'decimal:2',
         'total_discount' => 'decimal:2',
+        'amount_received' => 'decimal:2',
     ];
 
     public function shopOwner()
@@ -39,6 +41,16 @@ class Sale extends Model
     public function items()
     {
         return $this->hasMany(SaleItem::class);
+    }
+
+    public function receipts()
+    {
+        return $this->hasMany(Receipt::class);
+    }
+
+    public function productReturns()
+    {
+        return $this->hasMany(ProductReturn::class);
     }
 
     public function createdBy()

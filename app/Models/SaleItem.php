@@ -43,4 +43,9 @@ class SaleItem extends Model
     {
         return $this->belongsTo(Sale::class);
     }
+
+    public function returnItems()
+    {
+        return $this->hasMany(ReturnItem::class);
+    }
 }

@@ -31,7 +31,8 @@ class FeatureSeeder extends Seeder
                 ['name' => 'Product Units', 'slug' => 'products.units', 'sort_order' => 3],
                 ['name' => 'Product Bundles', 'slug' => 'products.bundles', 'sort_order' => 4],
                 ['name' => 'Product Pricing', 'slug' => 'products.pricing', 'sort_order' => 5],
-                ['name' => 'Inventory Stock', 'slug' => 'inventory.stock', 'sort_order' => 6],
+                ['name' => 'Product Brands', 'slug' => 'products.brands', 'sort_order' => 6],
+                ['name' => 'Inventory Stock', 'slug' => 'inventory.stock', 'sort_order' => 7],
             ],
             'inventory' => [
                 ['name' => 'Warehouses', 'slug' => 'inventory.warehouses', 'sort_order' => 1],
@@ -43,12 +44,18 @@ class FeatureSeeder extends Seeder
                 ['name' => 'Sales Management', 'slug' => 'sales', 'sort_order' => 1],
                 ['name' => 'POS Operations', 'slug' => 'sales.pos', 'sort_order' => 2],
                 ['name' => 'Sales Voids & Refunds', 'slug' => 'sales.refunds', 'sort_order' => 3],
+                ['name' => 'Receipts', 'slug' => 'sales.receipts', 'sort_order' => 4],
+                ['name' => 'Returns', 'slug' => 'returns', 'sort_order' => 5],
             ],
             'customers' => [
                 ['name' => 'Customer Management', 'slug' => 'customers', 'sort_order' => 1],
             ],
             'expenses' => [
                 ['name' => 'Expense Management', 'slug' => 'expenses', 'sort_order' => 1],
+            ],
+            'reports' => [
+                ['name' => 'Sales Reports', 'slug' => 'reports.sales', 'sort_order' => 1],
+                ['name' => 'Product Reports', 'slug' => 'reports.products', 'sort_order' => 2],
             ],
         ];
 
@@ -72,6 +79,18 @@ class FeatureSeeder extends Seeder
                             'name' => $permissionName,
                             'feature_id' => $feature->id,
                             'action' => $action,
+                            'guard_name' => 'web',
+                        ]
+                    );
+                }
+                // Add special 'process' permission for returns (using edit as the action type)
+                if ($featureData['slug'] === 'returns') {
+                    Permission::updateOrCreate(
+                        ['name' => 'returns.process'],
+                        [
+                            'name' => 'returns.process',
+                            'feature_id' => $feature->id,
+                            'action' => 'edit',
                             'guard_name' => 'web',
                         ]
                     );

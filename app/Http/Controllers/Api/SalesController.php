@@ -18,7 +18,7 @@ class SalesController extends Controller
 {
     use ResolvesShop;
 
-    public function __construct(private InventoryMovementService $movements) {}
+    public function __construct(private InventoryMovementService $movements, private \App\Services\ReceiptIssuer $receiptIssuer) {}
 
     public function overview(Request $request)
     {
@@ -117,6 +117,7 @@ class SalesController extends Controller
                 'voided_by' => $request->user()->id,
                 'void_reason' => $data['reason'],
             ])->save();
+            $this->receiptIssuer->issue($locked->fresh(), $request->user(), 'refund');
         });
 
         return response()->json($sale->fresh());

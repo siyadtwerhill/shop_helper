@@ -8,6 +8,7 @@ use App\Models\Sale;
 use App\Services\SaleItemService;
 use App\Services\ProductStockService;
 use App\Services\PricingService;
+use App\Services\ReceiptIssuer;
 use App\Exceptions\MinimumMarginViolationException;
 use App\Exceptions\PriceBelowMinimumException;
 use Illuminate\Validation\ValidationException;
@@ -20,6 +21,7 @@ class PosSaleController extends Controller
         private SaleItemService $saleItems,
         private ProductStockService $stock,
         private PricingService $pricing,
+        private ReceiptIssuer $receiptIssuer,
     ) {
     }
 
@@ -37,6 +39,8 @@ class PosSaleController extends Controller
             'items.*.variant_id' => 'nullable|integer',
             'discount_amount'    => 'nullable|numeric|min:0',
             'branch_id'          => 'nullable|integer',
+            'payment_method'     => 'nullable|in:cash,card,mobile_wallet,bank_transfer',
+            'amount_received'    => 'nullable|numeric|min:0',
         ]);
 
         $user = $request->user();
@@ -63,6 +67,7 @@ class PosSaleController extends Controller
                 'subtotal'        => 0,
                 'total_amount'    => 0,
                 'status'          => 'completed',
+                'payment_method'  => $data['payment_method'] ?? 'cash',
                 'created_by'      => $request->user()->id,
             ]);
 
@@ -132,11 +137,19 @@ class PosSaleController extends Controller
             }
 
             $discount = (string) ($data['discount_amount'] ?? '0.00');
-            $sale->update(['subtotal' => $subtotal, 'total_amount' => bcsub($subtotal, $discount, 2)]);
+            $total = bcsub($subtotal, $discount, 2);
+            $paymentMethod = $data['payment_method'] ?? 'cash';
+            $received = (string) ($data['amount_received'] ?? $total);
+            if ($paymentMethod === 'cash' && bccomp($received, $total, 2) < 0) {
+                throw ValidationException::withMessages(['amount_received' => ['Cash received must cover the sale total.']]);
+            }
+            $sale->update(['subtotal' => $subtotal, 'total_amount' => $total, 'amount_received' => $received]);
+            $this->receiptIssuer->issue($sale->fresh(), $request->user());
 
             return $sale;
         });
 
-        return response()->json($sale->load('items'), 201);
+        $receipt = $sale->receipts()->where('receipt_type', 'sale')->firstOrFail();
+        return response()->json($sale->load('items')->setRelation('receipt', $receipt), 201);
     }
 }

@@ -44,9 +44,13 @@ class BranchHeadRoleSeeder extends Seeder
                 'products.view',
                 'sales.pos.view',
                 'sales.pos.create',
+                'sales.view',
                 'inventory.stock.view',
+                'inventory.warehouses.view',
                 'employees.view',
                 'branches.view',
+                'customers.view',
+                'suppliers.view',
             ];
 
             // Get permission IDs for the shop's team context
