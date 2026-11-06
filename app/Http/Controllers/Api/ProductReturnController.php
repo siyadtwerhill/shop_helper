@@ -33,17 +33,18 @@ class ProductReturnController extends Controller
             $query->where('branch_id', $user->branch_id);
         }
 
-        // Filters
-        if ($request->has('status')) {
+        // Filters (filled = present AND non-empty, so the default "All Status"
+        // selection — sent as an empty string by the frontend — is ignored).
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
-        if ($request->has('from')) {
+        if ($request->filled('from')) {
             $query->whereDate('created_at', '>=', $request->from);
         }
-        if ($request->has('to')) {
+        if ($request->filled('to')) {
             $query->whereDate('created_at', '<=', $request->to);
         }
-        if ($request->has('q')) {
+        if ($request->filled('q')) {
             $query->where('return_number', 'like', '%' . $request->q . '%');
         }
 

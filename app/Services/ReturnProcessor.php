@@ -7,12 +7,19 @@ use App\Models\ReturnItem;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\InventoryMovement;
-use App\Models\ProductStock;
+use App\Services\InventoryMovementService;
+use App\Services\ProductStockService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Lock;
 
 class ReturnProcessor
 {
+    public function __construct(
+        private InventoryMovementService $movements,
+        private ProductStockService $stock,
+    ) {
+    }
+
     public function processReturn(Sale $sale, array $items, ?string $reason, ?string $notes, $user): ProductReturn
     {
         $shopOwnerId = $sale->shop_owner_id;
@@ -94,7 +101,7 @@ class ReturnProcessor
 
         if ($status === 'approved') {
             // Add stock back to inventory
-            $this->restockItems($return);
+            $this->restockItems($return, $user);
         } elseif ($status === 'voided') {
             // Remove stock if it was previously approved
             $this->removeStockForVoidedReturn($return);
@@ -105,56 +112,44 @@ class ReturnProcessor
         return $return;
     }
 
-    private function restockItems(ProductReturn $return): void
+    private function restockItems(ProductReturn $return, $user): void
     {
+        $return->loadMissing(['items.saleItem.unit', 'items.product', 'items.variant']);
+
         foreach ($return->items as $item) {
-            // Add inventory movement for return
-            InventoryMovement::create([
-                'shop_owner_id' => $return->shop_owner_id,
-                'branch_id' => $return->branch_id,
-                'product_id' => $item->product_id,
-                'variant_id' => $item->variant_id,
-                'movement_type' => 'return',
-                'quantity' => $item->quantity_returned,
-                'reference_id' => $return->id,
-                'reference_type' => ProductReturn::class,
-                'notes' => "Return #{$return->return_number}",
-            ]);
-
-            // Update product stock
-            $stock = ProductStock::where('shop_owner_id', $return->shop_owner_id)
-                ->where('branch_id', $return->branch_id)
-                ->where('product_id', $item->product_id)
-                ->first();
-
-            if ($stock) {
-                $stock->quantity += $item->quantity_returned;
-                $stock->save();
-            }
+            // Restock through the canonical movement service: it records the
+            // 'sale_return' ledger row with the correct unit_id + base_quantity
+            // and updates branch stock in a single step (matches the sale path).
+            $this->movements->saleReturn(
+                $item->product,
+                $item->saleItem->unit,
+                $item->quantity_returned,
+                referenceType: ProductReturn::class,
+                referenceId: $return->id,
+                createdBy: $user->id,
+                variant: $item->variant,
+                branchId: $return->branch_id,
+            );
         }
     }
 
     private function removeStockForVoidedReturn(ProductReturn $return): void
     {
-        // Find and reverse inventory movements for this return
-        $movements = InventoryMovement::where('reference_id', $return->id)
+        // Find and reverse the 'sale_return' movements recorded on approval.
+        $movements = InventoryMovement::with('product')
+            ->where('reference_id', $return->id)
             ->where('reference_type', ProductReturn::class)
-            ->where('movement_type', 'return')
+            ->where('movement_type', 'sale_return')
             ->get();
 
         foreach ($movements as $movement) {
-            // Reverse the stock change
-            $stock = ProductStock::where('shop_owner_id', $return->shop_owner_id)
-                ->where('branch_id', $return->branch_id)
-                ->where('product_id', $movement->product_id)
-                ->first();
+            // Reverse the base-unit stock that approval added back in.
+            $this->stock->applyMovement(
+                $movement->product,
+                (int) $movement->branch_id,
+                bcmul($movement->base_quantity, '-1', 4),
+            );
 
-            if ($stock) {
-                $stock->quantity -= $movement->quantity;
-                $stock->save();
-            }
-
-            // Mark movement as voided
             $movement->delete();
         }
     }
